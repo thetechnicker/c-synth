@@ -1,5 +1,6 @@
 #include "version.h"
 #include <stdio.h>
+#include <stdlib.h>
 
 int main() {
     printf("Version: %s (%s)%s, built: %s\n", PROJECT_GIT_DESCRIBE,

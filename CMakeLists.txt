@@ -126,3 +126,4 @@ add_custom_target(format
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   COMMENT "Run clang-format on sources and headers"
 )
+

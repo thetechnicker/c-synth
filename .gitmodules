@@ -1,0 +1,3 @@
+[submodule "external/portmidi"]
+	path = external/portmidi
+	url = https://github.com/PortMidi/portmidi.git

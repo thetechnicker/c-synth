@@ -1,4 +1,5 @@
 #include "midi.h"
+#include "synth.h"
 #include "portmidi.h"
 #include "porttime/porttime.h"
 #include "version.h"

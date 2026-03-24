@@ -1,4 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
+# Export compile_commands.json (useful for clangd)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 project(synth C)
 
 # Options
@@ -11,8 +14,6 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-# Export compile_commands.json (useful for clangd)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Source layout
 set(PROJECT_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)

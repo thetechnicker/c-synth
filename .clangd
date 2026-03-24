@@ -1,0 +1,7 @@
+CompileFlags:
+  CompilationDatabase: build/ # path to the dir containing compile_commands.json
+  Add: [-Wall, -Wextra] # optional: extra flags
+Diagnostics:
+  UnusedIncludes: Strict
+InlayHints:
+  Enabled: Yes

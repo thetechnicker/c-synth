@@ -11,12 +11,20 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
+# Export compile_commands.json (useful for clangd)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Source layout
 set(PROJECT_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 file(GLOB_RECURSE SYNTH_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c)
 if(NOT SYNTH_SOURCES)
   message(FATAL_ERROR "No sources found in src/*.c")
 endif()
+
+#if(MSVC)
+#  # Use static CRT: "MultiThreaded" = /MT, "MultiThreadedDebug" = /MTd
+#  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "" FORCE)
+#endif()
 
 # --- Git metadata via `git describe` ---
 find_package(Git QUIET)
@@ -90,6 +98,7 @@ install(DIRECTORY ${GENERATED_INCLUDE_DIR}/ DESTINATION include/synth_generated 
 add_executable(synth ${SYNTH_SOURCES})
 target_include_directories(synth PRIVATE ${PROJECT_INCLUDE_DIR} ${GENERATED_INCLUDE_DIR})
 
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libs" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/external/portmidi external/portmidi_build)
 # Common PortMidi target names used by community ports: portmidi or libportmidi
 # Adjust if the submodule defines a different target.
@@ -97,7 +106,7 @@ set(PORTMIDI_TARGET portmidi)
 # Expose include dir if needed (some trees install headers next to target)
 target_include_directories(synth PRIVATE ${CMAKE_SOURCE_DIR}/external/portmidi)
 target_link_libraries(synth PRIVATE ${PORTMIDI_TARGET})
-target_compile_definitions(synth PRIVATE USE_PORTMIDI=1)
+#target_compile_definitions(synth PRIVATE USE_PORTMIDI=1)
 
 
 # Compiler flags per-config and per-compiler
@@ -123,9 +132,6 @@ endif()
 if(UNIX)
   target_link_libraries(synth PRIVATE m)
 endif()
-
-# Export compile_commands.json (useful for clangd)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Install binary
 install(TARGETS synth RUNTIME DESTINATION bin)

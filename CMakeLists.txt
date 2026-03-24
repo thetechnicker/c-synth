@@ -90,6 +90,16 @@ install(DIRECTORY ${GENERATED_INCLUDE_DIR}/ DESTINATION include/synth_generated 
 add_executable(synth ${SYNTH_SOURCES})
 target_include_directories(synth PRIVATE ${PROJECT_INCLUDE_DIR} ${GENERATED_INCLUDE_DIR})
 
+add_subdirectory(${CMAKE_SOURCE_DIR}/external/portmidi external/portmidi_build)
+# Common PortMidi target names used by community ports: portmidi or libportmidi
+# Adjust if the submodule defines a different target.
+set(PORTMIDI_TARGET portmidi)
+# Expose include dir if needed (some trees install headers next to target)
+target_include_directories(synth PRIVATE ${CMAKE_SOURCE_DIR}/external/portmidi)
+target_link_libraries(synth PRIVATE ${PORTMIDI_TARGET})
+target_compile_definitions(synth PRIVATE USE_PORTMIDI=1)
+
+
 # Compiler flags per-config and per-compiler
 target_compile_options(synth PRIVATE
   # MSVC

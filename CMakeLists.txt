@@ -11,7 +11,7 @@ option(ENABLE_SSE "Enable SSE optimizations" OFF)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
 endif()
 
 
@@ -22,10 +22,8 @@ if(NOT SYNTH_SOURCES)
   message(FATAL_ERROR "No sources found in src/*.c")
 endif()
 
-#if(MSVC)
-#  # Use static CRT: "MultiThreaded" = /MT, "MultiThreadedDebug" = /MTd
-#  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "" FORCE)
-#endif()
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
 
 # --- Git metadata via `git describe` ---
 find_package(Git QUIET)
@@ -100,14 +98,16 @@ add_executable(synth ${SYNTH_SOURCES})
 target_include_directories(synth PRIVATE ${PROJECT_INCLUDE_DIR} ${GENERATED_INCLUDE_DIR})
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libs" FORCE)
+
 add_subdirectory(${CMAKE_SOURCE_DIR}/external/portmidi external/portmidi_build)
-# Common PortMidi target names used by community ports: portmidi or libportmidi
-# Adjust if the submodule defines a different target.
 set(PORTMIDI_TARGET portmidi)
-# Expose include dir if needed (some trees install headers next to target)
 target_include_directories(synth PRIVATE ${CMAKE_SOURCE_DIR}/external/portmidi)
 target_link_libraries(synth PRIVATE ${PORTMIDI_TARGET})
-#target_compile_definitions(synth PRIVATE USE_PORTMIDI=1)
+
+add_subdirectory(${CMAKE_SOURCE_DIR}/external/sdl external/sdl_build)
+set(SDL_TARGET SDL3::SDL3)
+target_include_directories(synth PRIVATE ${CMAKE_SOURCE_DIR}/external/sdl)
+target_link_libraries(synth PRIVATE ${SDL_TARGET})
 
 
 # Compiler flags per-config and per-compiler

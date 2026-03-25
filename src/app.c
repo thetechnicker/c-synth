@@ -13,16 +13,25 @@
 #define MAX_TITLE_LEN 256
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
-
-    argparse_init(ap, 1,err);
-
+    ArgParse *ap = malloc(sizeof(ArgParse));
+    ArgParseError arg_err;
+    if (argparse_init(ap, 0, &arg_err) != APERR_OK) {
+        ARGPARSE_ERROR_PRINT_VAL(arg_err);
+        return SDL_APP_FAILURE;
+    }
     char title[MAX_TITLE_LEN];
     sprintf(title, "Version: %s (%s)%s, built: %s", PROJECT_GIT_DESCRIBE,
             PROJECT_GIT_COMMIT, PROJECT_GIT_DIRTY ? "-dirty" : "",
             PROJECT_BUILD_TIMESTAMP);
-
     printf("%s\n", title);
+    SDL_AppResult res = argparse_parse(argc, argv, ap, &arg_err);
+    if (res != SDL_APP_CONTINUE) {
+        ARGPARSE_ERROR_PRINT_VAL(arg_err);
+        return res;
+    }
+
     App_t *app = malloc(sizeof(App_t));
+    app->ap = ap;
 
     SDL_Window *window =
         SDL_CreateWindow(title, 800, 600, SDL_WINDOW_FULLSCREEN);
@@ -124,6 +133,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 }
 
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
+    (void)appstate;
 
     char buf[256];
     SDL_GetEventDescription(event, buf, sizeof(buf));
@@ -138,7 +148,10 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
     return SDL_APP_CONTINUE;
 }
 
-void SDL_AppQuit(void *appstate, SDL_AppResult result) {}
+void SDL_AppQuit(void *appstate, SDL_AppResult result) {
+    (void)appstate;
+    (void)result;
+}
 
 /*int main(void) {
     char title[MAX_TITLE_LEN];

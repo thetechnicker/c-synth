@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 /* If you use SDL_AppResult, include SDL headers in the translation unit that
  * calls argparse_parse (this header only references the type). */
@@ -109,6 +110,27 @@ typedef struct {
     const char *file; /* __FILE__ at point of creation */
     int line;         /* __LINE__ at point of creation */
 } ArgParseError;
+
+/* pointer variant */
+#define ARGPARSE_ERROR_PRINT(errp)                                             \
+    do {                                                                       \
+        const ArgParseError *e_ = (errp);                                      \
+        fprintf(stderr,                                                        \
+                "ArgParseError: code=%d, msg=\"%s\", file=\"%s\", line=%d\n",  \
+                (int)(e_ ? e_->code : 0),                                      \
+                (e_ && e_->msg) ? e_->msg : "(null)",                          \
+                (e_ && e_->file) ? e_->file : "(null)", (e_ ? e_->line : 0));  \
+    } while (0)
+
+/* value variant (takes an ArgParseError value) */
+#define ARGPARSE_ERROR_PRINT_VAL(ev)                                           \
+    do {                                                                       \
+        const ArgParseError *e_ = &(ev);                                       \
+        fprintf(stderr,                                                        \
+                "ArgParseError: code=%d, msg=\"%s\", file=\"%s\", line=%d\n",  \
+                (int)e_->code, e_->msg ? e_->msg : "(null)",                   \
+                e_->file ? e_->file : "(null)", e_->line);                     \
+    } while (0)
 
 /* Builder/pipeline API
  *

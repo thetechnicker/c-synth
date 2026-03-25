@@ -171,7 +171,7 @@ void argparse_free(ArgParse *ap) {
 
 int add_kw_argument(ArgParse *ap, const char *label, bool has_abrv,
                     char overwrite_abrv, ValueType type, Value *out,
-                    bool required) {
+                    bool required, const char *description) {
     ArgDef *slot;
     int rc = add_element(ap, &slot);
     if (rc)
@@ -181,6 +181,7 @@ int add_kw_argument(ArgParse *ap, const char *label, bool has_abrv,
         return EINVAL;
 
     slot->type = ARG_KEYWORD;
+    slot->description = description;
     slot->keyword.long_name = (char *)label;
     slot->keyword.has_abrv = has_abrv;
     slot->keyword.overwrite_abrv = overwrite_abrv;
@@ -191,7 +192,8 @@ int add_kw_argument(ArgParse *ap, const char *label, bool has_abrv,
 }
 
 int add_flag(ArgParse *ap, const char *label, bool has_abrv,
-             char overwrite_abrv, bool *out, bool required) {
+             char overwrite_abrv, bool *out, bool required,
+             const char *description) {
     ArgDef *slot;
     int rc = add_element(ap, &slot);
     if (rc)
@@ -201,6 +203,7 @@ int add_flag(ArgParse *ap, const char *label, bool has_abrv,
         return EINVAL;
 
     slot->type = ARG_FLAG;
+    slot->description = description;
     slot->flag.long_name = (char *)label;
     slot->flag.has_abrv = has_abrv;
     slot->flag.overwrite_abrv = overwrite_abrv;
@@ -210,7 +213,7 @@ int add_flag(ArgParse *ap, const char *label, bool has_abrv,
 }
 
 int add_positional_argument(ArgParse *ap, ValueType type, Value *out,
-                            bool required) {
+                            bool required, const char *description) {
     ArgDef *slot;
     int rc = add_element(ap, &slot);
     if (rc)
@@ -220,14 +223,15 @@ int add_positional_argument(ArgParse *ap, ValueType type, Value *out,
         return EINVAL;
 
     slot->type = ARG_POSITIONAL;
+    slot->description = description;
     slot->positional.type = type;
     slot->positional.out = out;
     slot->positional.required = required;
     return 0;
 }
 
-int add_flaglist(ArgParse *ap, const char *label, uint32_t *out,
-                 bool required) {
+int add_flaglist(ArgParse *ap, const char *label, uint32_t *out, bool required,
+                 const char *description) {
     ArgDef *slot;
     int rc = add_element(ap, &slot);
     if (rc)
@@ -237,6 +241,7 @@ int add_flaglist(ArgParse *ap, const char *label, uint32_t *out,
         return EINVAL;
 
     slot->type = ARG_FLAG_LIST;
+    slot->description = description;
     slot->flag_list.list_name = (char *)label;
     slot->flag_list.count = 0;
     slot->flag_list.out = out;
@@ -294,9 +299,46 @@ static const char *valuetype_name(ValueType t) {
     return "?";
 }
 
+/* Print a single option line with aligned columns.
+ *
+ * Format:
+ *   <left_col>    <right_col>
+ *
+ * left_col  : flag/name/type info, left-padded with 2 spaces
+ * right_col : description (if non-NULL), separated by enough spaces to reach
+ *             HELP_DESC_COL
+ */
+#define HELP_DESC_COL 32
+
+static void print_option_line(FILE *out, const char *left, const char *tag,
+                              bool required, const char *description) {
+    /* build left column: "  --name <type>" or "  --name" */
+    char col[128];
+    int n = snprintf(col, sizeof col, "  %s", left);
+    if (tag && tag[0])
+        n += snprintf(col + n, sizeof col - (size_t)n, " <%s>", tag);
+
+    fprintf(out, "%s", col);
+
+    /* pad to description column */
+    int pad = HELP_DESC_COL - n;
+    if (pad < 2)
+        pad = 2;
+    fprintf(out, "%*s", pad, "");
+
+    if (required)
+        fprintf(out, "[required]");
+    if (description && description[0]) {
+        if (required)
+            fprintf(out, "  ");
+        fprintf(out, "%s", description);
+    }
+    fprintf(out, "\n");
+}
+
 /* Print help/usage for an ArgParse definition.
- * - out: destination (eg. stdout or stderr)
- * - progname: program name to show in usage (if NULL use "program")
+ * - out: destination (e.g. stdout or stderr)
+ * - progname: program name to show in usage (if NULL use ap->app_name)
  * - ap: pointer to ArgParse (must be initialized)
  */
 void argparse_print_help(FILE *out, const char *progname, const ArgParse *ap) {
@@ -364,70 +406,64 @@ void argparse_print_help(FILE *out, const char *progname, const ArgParse *ap) {
         switch (d->type) {
         case ARG_FLAG: {
             const char *lname = d->flag.long_name ? d->flag.long_name : "";
-            char abrvbuf[8] = "";
-            if (d->flag.has_abrv) {
-                abrvbuf[0] = '-';
-                abrvbuf[1] =
-                    d->flag.overwrite_abrv ? d->flag.overwrite_abrv : '\0';
-                abrvbuf[2] = '\0';
-            }
-            fprintf(out, "  --%s", lname);
-            if (abrvbuf[1])
-                fprintf(out, ", %s", abrvbuf);
-            fprintf(out, "\t(FLAG)%s\n", d->flag.required ? " [required]" : "");
+            char abrv = effective_abrv(d->flag.has_abrv,
+                                       d->flag.overwrite_abrv, lname);
+            char left[64];
+            if (abrv)
+                snprintf(left, sizeof left, "--%s, -%c", lname, abrv);
+            else
+                snprintf(left, sizeof left, "--%s", lname);
+            print_option_line(out, left, NULL, d->flag.required,
+                              d->description);
             break;
         }
         case ARG_KEYWORD: {
             const char *lname =
                 d->keyword.long_name ? d->keyword.long_name : "";
-            char abrvbuf[8] = "";
-            if (d->keyword.has_abrv) {
-                abrvbuf[0] = '-';
-                abrvbuf[1] = d->keyword.overwrite_abrv
-                                 ? d->keyword.overwrite_abrv
-                                 : '\0';
-                abrvbuf[2] = '\0';
-            }
-            fprintf(out, "  --%s <%s>", lname, valuetype_name(d->keyword.type));
-            if (abrvbuf[1])
-                fprintf(out, ", %s", abrvbuf);
-            fprintf(out, "\t(KEYWORD)%s\n",
-                    d->keyword.required ? " [required]" : "");
+            char abrv = effective_abrv(d->keyword.has_abrv,
+                                       d->keyword.overwrite_abrv, lname);
+            char left[64];
+            if (abrv)
+                snprintf(left, sizeof left, "--%s, -%c", lname, abrv);
+            else
+                snprintf(left, sizeof left, "--%s", lname);
+            print_option_line(out, left, valuetype_name(d->keyword.type),
+                              d->keyword.required, d->description);
             break;
         }
         case ARG_POSITIONAL: {
-            fprintf(out, "  <%s>\t(POSITIONAL)%s\n",
-                    valuetype_name(d->positional.type),
-                    d->positional.required ? " [required]" : "");
+            char left[32];
+            snprintf(left, sizeof left, "%s",
+                     valuetype_name(d->positional.type));
+            print_option_line(out, left, NULL, d->positional.required,
+                              d->description);
             break;
         }
         case ARG_FLAG_LIST: {
             const char *lname =
                 d->flag_list.list_name ? d->flag_list.list_name : "";
-            fprintf(out, "  --%s\t(FLAG LIST)%s\n", lname,
-                    d->flag_list.required ? " [required]" : "");
-            /* list entries */
+            char left[64];
+            snprintf(left, sizeof left, "--%s", lname);
+            print_option_line(out, left, NULL, d->flag_list.required,
+                              d->description);
+            /* list member entries — indented, no per-entry description */
             for (uint32_t j = 0; j < d->flag_list.count; ++j) {
                 FlagEntry *fe = &d->flag_list.flags[j];
                 if (!fe->long_name)
                     continue;
-                char abrvbuf[8] = "";
-                if (fe->has_abrv) {
-                    abrvbuf[0] = '-';
-                    abrvbuf[1] = fe->overwrite_abrv ? fe->overwrite_abrv : '\0';
-                    abrvbuf[2] = '\0';
-                }
-                fprintf(out, "    --%s", fe->long_name);
-                if (abrvbuf[1])
-                    fprintf(out, ", %s", abrvbuf);
-                fprintf(out, "\n");
+                char abrv = effective_abrv(fe->has_abrv, fe->overwrite_abrv,
+                                           fe->long_name);
+                if (abrv)
+                    fprintf(out, "    --%s, -%c\n", fe->long_name, abrv);
+                else
+                    fprintf(out, "    --%s\n", fe->long_name);
             }
             break;
         }
         }
     }
 
-    fprintf(out, "Version: %s (%s)%s, built: %s", PROJECT_GIT_DESCRIBE,
+    fprintf(out, "\nVersion: %s (%s)%s, built: %s\n", PROJECT_GIT_DESCRIBE,
             PROJECT_GIT_COMMIT, PROJECT_GIT_DIRTY ? "-dirty" : "",
             PROJECT_BUILD_TIMESTAMP);
     fflush(out);
@@ -476,7 +512,6 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap) {
             free(pos_defs);
             errno = 0;
             argparse_print_help(stdout, NULL, ap);
-            // LOGI("argparse_parse: help requested");
             return SDL_APP_SUCCESS;
         }
 

@@ -57,7 +57,6 @@ typedef struct {
 
 typedef struct {
     char *long_name;
-    const char *description;
     bool has_abrv;
     char overwrite_abrv;
 } FlagEntry;
@@ -79,7 +78,7 @@ typedef enum {
 
 typedef struct {
     ArgType type;
-    const char *description;
+    const char *description; /* human-readable help text; may be NULL */
     union {
         KeywordArg keyword;
         Flag flag;
@@ -122,6 +121,9 @@ typedef struct {
  *
  * NOTE: many parameters are pointer types that must remain valid (e.g. value
  *       pointers and long_name strings) for the lifetime of the parser run.
+ *
+ * The `description` parameter in each builder is a human-readable help string
+ * displayed by argparse_print_help. Pass NULL to omit.
  */
 
 int argparse_init(ArgParse *ap, const char *app_name, const char *usage,
@@ -134,28 +136,34 @@ void argparse_free(ArgParse *ap);
  *  - has_abrv, overwrite_abrv: as before
  *  - out: Value* (non-NULL recommended) — parser writes only on explicit match
  *  - required: whether presence is mandatory
+ *  - description: help text shown by --help (may be NULL)
  */
 int add_kw_argument(ArgParse *ap, const char *label, bool has_abrv,
                     char overwrite_abrv, ValueType type, Value *out,
-                    bool required);
+                    bool required, const char *description);
 
 /* initialize/overwrite a slot as a flag argument:
  *  - out: bool* (non-NULL recommended)
+ *  - description: help text shown by --help (may be NULL)
  */
 int add_flag(ArgParse *ap, const char *label, bool has_abrv,
-             char overwrite_abrv, bool *out, bool required);
+             char overwrite_abrv, bool *out, bool required,
+             const char *description);
 
 /* initialize/overwrite a slot as a positional argument:
  *  - out: Value* (non-NULL recommended)
+ *  - description: help text shown by --help (may be NULL)
  */
 int add_positional_argument(ArgParse *ap, ValueType type, Value *out,
-                            bool required);
+                            bool required, const char *description);
 
 /* initialize/overwrite a slot as a flaglist:
  *  - out: uint32_t* bitmask (non-NULL recommended)
  *  - count must be set to 0 by builder; entries are added via add_flaglist_flag
+ *  - description: help text shown by --help (may be NULL)
  */
-int add_flaglist(ArgParse *ap, const char *label, uint32_t *out, bool required);
+int add_flaglist(ArgParse *ap, const char *label, uint32_t *out, bool required,
+                 const char *description);
 
 /* add a flag entry into an existing FlagList in an array of ArgDef:
  *  - ap: ArgParse whose args[] will be searched for the FlagList by its
@@ -166,6 +174,8 @@ int add_flaglist(ArgParse *ap, const char *label, uint32_t *out, bool required);
  *
  * Returns ENOENT if the FlagList named list_label is not found.
  * Returns EOVERFLOW if the FlagList already has 32 flags.
+ *
+ * Note: FlagEntry has no description field; per-entry help is not supported.
  */
 int add_flaglist_flag(ArgParse *ap, const char *flag_label,
                       const char *list_label, bool has_abrv,

@@ -18,6 +18,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
 
     ArgParse *ap = malloc(sizeof(ArgParse));
     CHECK_ERR_SDL(argparse_init(ap, "C-Synth", NULL, NULL, 0));
+    create_app_argparse(ap);
 
     SDL_AppResult res = argparse_parse(argc, argv, ap);
     if (res != SDL_APP_CONTINUE) {
@@ -50,14 +51,15 @@ failure:
 
 SDL_AppResult SDL_AppIterate(void *appstate) {
     App_t *app = (App_t *)appstate;
-    //PmEvent buffer[32];
-    //int count = Pm_Read(app->stream, buffer, 32);
-    //if (count < 0) {
-    //    fprintf(stderr, "Pm_Read error: %d\n", count);
-    //    return SDL_APP_FAILURE;
-    //}
-    //for (int i = 0; i < count; ++i) {
-    //    midi_message_unpacked_t msg = midi_from_uint32(buffer[i].message).msg;
+    // PmEvent buffer[32];
+    // int count = Pm_Read(app->stream, buffer, 32);
+    // if (count < 0) {
+    //     fprintf(stderr, "Pm_Read error: %d\n", count);
+    //     return SDL_APP_FAILURE;
+    // }
+    // for (int i = 0; i < count; ++i) {
+    //     midi_message_unpacked_t msg =
+    //     midi_from_uint32(buffer[i].message).msg;
 
     //    printf("message: data1: %u, data2: %u, padding: %u, status: %u\n",
     //           msg.data1, msg.data2, msg._pad, msg.status.raw);
@@ -72,7 +74,8 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     //               msg.data1, msg.data2);
     //        break;
     //    case 0xB:
-    //        printf("Control    ch=%u ctrl=%u val=%u\n", msg.status.channel + 1,
+    //        printf("Control    ch=%u ctrl=%u val=%u\n", msg.status.channel +
+    //        1,
     //               msg.data1, msg.data2);
     //        break;
     //    case 0xC:
@@ -107,6 +110,9 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
 void SDL_AppQuit(void *appstate, SDL_AppResult result) {
     (void)appstate;
     (void)result;
+}
+
+void create_app_argparse(ArgParse *ap){
 }
 
 /*

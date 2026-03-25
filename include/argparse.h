@@ -60,6 +60,7 @@ typedef struct {
 } FlagEntry;
 
 typedef struct {
+    char *list_name;
     FlagEntry flags[32];
     uint32_t count;
     uint32_t *out;
@@ -82,6 +83,12 @@ typedef struct {
         FlagList flag_list;
     };
 } ArgDef;
+
+typedef struct {
+    ArgDef *args;
+    size_t len;
+    size_t cap;
+} ArgParse;
 
 /* New error type returned by builder functions and by parser ----------------*/
 
@@ -118,13 +125,18 @@ typedef struct {
  *       pointers and long_name strings) for the lifetime of the parser run.
  */
 
+ArgParseErrCode argparse_init(ArgParse *ap, size_t capacity,
+                              ArgParseError *err);
+
+void argparse_free(ArgParse *ap);
+
 /* initialize/overwrite a slot as a keyword argument:
  *  - label: long option name (null-terminated)
  *  - has_abrv, overwrite_abrv: as before
  *  - out: Value* (non-NULL recommended) — parser writes only on explicit match
  *  - required: whether presence is mandatory
  */
-ArgParseErrCode add_kw_argument(ArgDef *slot, const char *label, bool has_abrv,
+ArgParseErrCode add_kw_argument(ArgParse *ap, const char *label, bool has_abrv,
                                 char overwrite_abrv, ValueType type, Value *out,
                                 bool required,
                                 ArgParseError *err); /* nullable */
@@ -132,14 +144,14 @@ ArgParseErrCode add_kw_argument(ArgDef *slot, const char *label, bool has_abrv,
 /* initialize/overwrite a slot as a flag argument:
  *  - out: bool* (non-NULL recommended)
  */
-ArgParseErrCode add_flag(ArgDef *slot, const char *label, bool has_abrv,
+ArgParseErrCode add_flag(ArgParse *ap, const char *label, bool has_abrv,
                          char overwrite_abrv, bool *out, bool required,
                          ArgParseError *err);
 
 /* initialize/overwrite a slot as a positional argument:
  *  - out: Value* (non-NULL recommended)
  */
-ArgParseErrCode add_positional_argument(ArgDef *slot, ValueType type,
+ArgParseErrCode add_positional_argument(ArgParse *ap, ValueType type,
                                         Value *out, bool required,
                                         ArgParseError *err);
 
@@ -147,7 +159,7 @@ ArgParseErrCode add_positional_argument(ArgDef *slot, ValueType type,
  *  - out: uint32_t* bitmask (non-NULL recommended)
  *  - count must be set to 0 by builder; entries are added via add_flaglist_flag
  */
-ArgParseErrCode add_flaglist(ArgDef *slot, const char *label, uint32_t *out,
+ArgParseErrCode add_flaglist(ArgParse *ap, const char *label, uint32_t *out,
                              bool required, ArgParseError *err);
 
 /* add a flag entry into an existing FlagList in an array of ArgDef:
@@ -159,8 +171,7 @@ ArgParseErrCode add_flaglist(ArgDef *slot, const char *label, uint32_t *out,
  * If the FlagList named list_label is not found, returns APERR_NOT_FOUND.
  * If the FlagList already has 32 flags, returns APERR_OVERFLOW.
  */
-ArgParseErrCode add_flaglist_flag(ArgDef *defs, size_t ndefs,
-                                  const char *flag_label,
+ArgParseErrCode add_flaglist_flag(ArgParse *ap, const char *flag_label,
                                   const char *list_label, bool has_abrv,
                                   char overwrite_abrv, ArgParseError *err);
 
@@ -179,7 +190,7 @@ ArgParseErrCode add_flaglist_flag(ArgDef *defs, size_t ndefs,
  * you call argparse_parse. If your SDL version provides different symbols,
  * adapt the mapping in the implementation.
  */
-SDL_AppResult argparse_parse(int argc, char **argv, const ArgDef *defs,
-                             size_t n, ArgParseError *err); /* nullable */
+SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap,
+                             ArgParseError *err);
 
 #endif /* ARGPARSE_H */

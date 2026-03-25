@@ -13,7 +13,8 @@
 #define MAX_TITLE_LEN 256
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
-    argparse_parse(argc, argv, NULL, 0);
+
+    argparse_init(ap, 1,err);
 
     char title[MAX_TITLE_LEN];
     sprintf(title, "Version: %s (%s)%s, built: %s", PROJECT_GIT_DESCRIBE,
@@ -110,11 +111,13 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                    msg.data1, msg.data2);
             break;
         case 0xC:
-            printf("ProgramCh  ch=%u prog=%u\n", msg.status.channel + 1, msg.data1);
+            printf("ProgramCh  ch=%u prog=%u\n", msg.status.channel + 1,
+                   msg.data1);
             break;
         default:
-            printf("Other msg  status=0x%02X ch=%u d1=%u d2=%u\n", msg.status.type,
-                   msg.status.channel + 1, msg.data1, msg.data2);
+            printf("Other msg  status=0x%02X ch=%u d1=%u d2=%u\n",
+                   msg.status.type, msg.status.channel + 1, msg.data1,
+                   msg.data2);
         }
     }
     return SDL_APP_CONTINUE;

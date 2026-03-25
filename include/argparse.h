@@ -57,6 +57,7 @@ typedef struct {
 
 typedef struct {
     char *long_name;
+    const char *description;
     bool has_abrv;
     char overwrite_abrv;
 } FlagEntry;
@@ -78,6 +79,7 @@ typedef enum {
 
 typedef struct {
     ArgType type;
+    const char *description;
     union {
         KeywordArg keyword;
         Flag flag;

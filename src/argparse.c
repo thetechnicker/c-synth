@@ -303,7 +303,7 @@ void argparse_print_help(FILE *out, const char *progname, const ArgParse *ap) {
     if (!out || !ap)
         return;
     const char *pname =
-        progname ? progname : (ap->app_name ? ap->app_name : "program");
+        progname ? progname : (ap->app_name ? ap->app_name : PROJECT_NAME);
 
     /* Header / usage */
     fprintf(out, "Usage: %s", pname);
@@ -475,7 +475,7 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap) {
             free(matched);
             free(pos_defs);
             errno = 0;
-            argparse_print_help(stdout, PROJECT_NAME, ap);
+            argparse_print_help(stdout, NULL, ap);
             // LOGI("argparse_parse: help requested");
             return SDL_APP_SUCCESS;
         }

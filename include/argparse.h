@@ -1,6 +1,7 @@
 #ifndef ARGPARSE_H
 #define ARGPARSE_H
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -8,7 +9,7 @@
 
 /* If you use SDL_AppResult, include SDL headers in the translation unit that
  * calls argparse_parse (this header only references the type). */
-#include <SDL3/SDL.h>/* optional here; caller can include instead */
+#include <SDL3/SDL.h> /* optional here; caller can include instead */
 
 /* Existing Value / ArgDef types (unchanged) --------------------------------*/
 
@@ -86,51 +87,28 @@ typedef struct {
 } ArgDef;
 
 typedef struct {
+    const char *app_name;
+    const char *usage;
+    const char *description;
     ArgDef *args;
     size_t len;
     size_t cap;
 } ArgParse;
 
-/* New error type returned by builder functions and by parser ----------------*/
-
-typedef enum {
-    APERR_OK = 0,
-    APERR_OOM,
-    APERR_INVALID_ARG,   /* invalid parameter passed to builder */
-    APERR_OVERFLOW,      /* array full / too many flags in list */
-    APERR_NOT_FOUND,     /* flaglist label not found (for add_flaglist_flag) */
-    APERR_TYPE_MISMATCH, /* caller-provided out pointer type mismatch
-                            (best-effort) */
-    APERR_OTHER,
-} ArgParseErrCode;
-
-typedef struct {
-    ArgParseErrCode code;
-    const char *msg;  /* brief message (string literal or owned by caller) */
-    const char *file; /* __FILE__ at point of creation */
-    int line;         /* __LINE__ at point of creation */
-} ArgParseError;
-
-/* pointer variant */
-#define ARGPARSE_ERROR_PRINT(errp)                                             \
-    do {                                                                       \
-        const ArgParseError *e_ = (errp);                                      \
-        fprintf(stderr,                                                        \
-                "ArgParseError: code=%d, msg=\"%s\", file=\"%s\", line=%d\n",  \
-                (int)(e_ ? e_->code : 0),                                      \
-                (e_ && e_->msg) ? e_->msg : "(null)",                          \
-                (e_ && e_->file) ? e_->file : "(null)", (e_ ? e_->line : 0));  \
-    } while (0)
-
-/* value variant (takes an ArgParseError value) */
-#define ARGPARSE_ERROR_PRINT_VAL(ev)                                           \
-    do {                                                                       \
-        const ArgParseError *e_ = &(ev);                                       \
-        fprintf(stderr,                                                        \
-                "ArgParseError: code=%d, msg=\"%s\", file=\"%s\", line=%d\n",  \
-                (int)e_->code, e_->msg ? e_->msg : "(null)",                   \
-                e_->file ? e_->file : "(null)", e_->line);                     \
-    } while (0)
+/* Error reporting model
+ *
+ * All builder/parser functions now return a POSIX-style error code:
+ *   0        : success
+ *   ENOMEM   : out of memory
+ *   EINVAL   : invalid argument passed to builder
+ *   EOVERFLOW: array/full / too many flags in list
+ *   ENOENT   : not found (e.g., flaglist label not found)
+ *   EFAULT   : type mismatch or bad pointer (best-effort)
+ *   other errno values as appropriate
+ *
+ * Functions do not fill an out-parameter error struct; callers can inspect
+ * the returned errno-style code and use strerror() for text.
+ */
 
 /* Builder/pipeline API
  *
@@ -140,15 +118,12 @@ typedef struct {
  *     search for the FlagList by its long_name.
  *   - Builders write into the provided ArgDef slot (overwriting it).
  *
- * All builder functions return ArgParseErrCode; if non-APERR_OK and `err` is
- * non-NULL it will be filled with diagnostic info (msg/file/line).
- *
  * NOTE: many parameters are pointer types that must remain valid (e.g. value
  *       pointers and long_name strings) for the lifetime of the parser run.
  */
 
-ArgParseErrCode argparse_init(ArgParse *ap, size_t capacity,
-                              ArgParseError *err);
+int argparse_init(ArgParse *ap, const char *app_name, const char *usage,
+                  const char *description, size_t capacity);
 
 void argparse_free(ArgParse *ap);
 
@@ -158,44 +133,41 @@ void argparse_free(ArgParse *ap);
  *  - out: Value* (non-NULL recommended) — parser writes only on explicit match
  *  - required: whether presence is mandatory
  */
-ArgParseErrCode add_kw_argument(ArgParse *ap, const char *label, bool has_abrv,
-                                char overwrite_abrv, ValueType type, Value *out,
-                                bool required,
-                                ArgParseError *err); /* nullable */
+int add_kw_argument(ArgParse *ap, const char *label, bool has_abrv,
+                    char overwrite_abrv, ValueType type, Value *out,
+                    bool required);
 
 /* initialize/overwrite a slot as a flag argument:
  *  - out: bool* (non-NULL recommended)
  */
-ArgParseErrCode add_flag(ArgParse *ap, const char *label, bool has_abrv,
-                         char overwrite_abrv, bool *out, bool required,
-                         ArgParseError *err);
+int add_flag(ArgParse *ap, const char *label, bool has_abrv,
+             char overwrite_abrv, bool *out, bool required);
 
 /* initialize/overwrite a slot as a positional argument:
  *  - out: Value* (non-NULL recommended)
  */
-ArgParseErrCode add_positional_argument(ArgParse *ap, ValueType type,
-                                        Value *out, bool required,
-                                        ArgParseError *err);
+int add_positional_argument(ArgParse *ap, ValueType type, Value *out,
+                            bool required);
 
 /* initialize/overwrite a slot as a flaglist:
  *  - out: uint32_t* bitmask (non-NULL recommended)
  *  - count must be set to 0 by builder; entries are added via add_flaglist_flag
  */
-ArgParseErrCode add_flaglist(ArgParse *ap, const char *label, uint32_t *out,
-                             bool required, ArgParseError *err);
+int add_flaglist(ArgParse *ap, const char *label, uint32_t *out, bool required);
 
 /* add a flag entry into an existing FlagList in an array of ArgDef:
- *  - defs/ndefs: array + count to search for the FlagList by its long_name
+ *  - ap: ArgParse whose args[] will be searched for the FlagList by its
+ * long_name
  *  - flag_label: long_name for the new flag entry
  *  - list_label: label of the FlagList to which this entry will be added
  *  - has_abrv, overwrite_abrv: as before
  *
- * If the FlagList named list_label is not found, returns APERR_NOT_FOUND.
- * If the FlagList already has 32 flags, returns APERR_OVERFLOW.
+ * Returns ENOENT if the FlagList named list_label is not found.
+ * Returns EOVERFLOW if the FlagList already has 32 flags.
  */
-ArgParseErrCode add_flaglist_flag(ArgParse *ap, const char *flag_label,
-                                  const char *list_label, bool has_abrv,
-                                  char overwrite_abrv, ArgParseError *err);
+int add_flaglist_flag(ArgParse *ap, const char *flag_label,
+                      const char *list_label, bool has_abrv,
+                      char overwrite_abrv);
 
 /* Parser: no longer exits. Returns an SDL_AppResult to indicate what the
  * application should do:
@@ -204,15 +176,13 @@ ArgParseErrCode add_flaglist_flag(ArgParse *ap, const char *flag_label,
  *   - SDL_APP_EXIT (application should exit with code 0)
  *   - SDL_APP_EXIT_FAILURE (application should exit with code 1)
  *
- * The function will populate `err` on failure (nullable). It will not call
- * exit() or print to stderr/stdout; the caller should handle messaging and
- * program termination according to the returned SDL_AppResult and err.
+ * The function will return non-zero (a POSIX errno) on failure; callers should
+ * use the returned errno to decide messaging/termination. The function will
+ * not call exit() or print to stderr/stdout.
  *
- * The exact SDL_AppResult enum is provided by SDL; include <SDL.h> where
- * you call argparse_parse. If your SDL version provides different symbols,
- * adapt the mapping in the implementation.
+ * Include <SDL.h> in the translation unit that calls argparse_parse so that
+ * SDL_AppResult is defined appropriately for your SDL version.
  */
-SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap,
-                             ArgParseError *err);
+SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap);
 
 #endif /* ARGPARSE_H */

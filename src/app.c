@@ -1,5 +1,6 @@
 #include "app.h"
 #include "argparse.h"
+#include "log.h"
 #include "midi.h"
 #include "version.h"
 #include <stdint.h>
@@ -13,26 +14,23 @@
 #define MAX_TITLE_LEN 256
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
+    log_init("app.log.jsonl", LOG_DEBUG);
+
     ArgParse *ap = malloc(sizeof(ArgParse));
-    ArgParseError arg_err;
-    if (argparse_init(ap, 0, &arg_err) != APERR_OK) {
-        ARGPARSE_ERROR_PRINT_VAL(arg_err);
-        return SDL_APP_FAILURE;
-    }
-    char title[MAX_TITLE_LEN];
-    sprintf(title, "Version: %s (%s)%s, built: %s", PROJECT_GIT_DESCRIBE,
-            PROJECT_GIT_COMMIT, PROJECT_GIT_DIRTY ? "-dirty" : "",
-            PROJECT_BUILD_TIMESTAMP);
-    printf("%s\n", title);
-    SDL_AppResult res = argparse_parse(argc, argv, ap, &arg_err);
+    CHECK_ERR_SDL(argparse_init(ap, "C-Synth", NULL, NULL, 0));
+
+    SDL_AppResult res = argparse_parse(argc, argv, ap);
     if (res != SDL_APP_CONTINUE) {
-        ARGPARSE_ERROR_PRINT_VAL(arg_err);
         return res;
     }
 
     App_t *app = malloc(sizeof(App_t));
     app->ap = ap;
 
+    char title[MAX_TITLE_LEN];
+    sprintf(title, "Version: %s (%s)%s, built: %s", PROJECT_GIT_DESCRIBE,
+            PROJECT_GIT_COMMIT, PROJECT_GIT_DIRTY ? "-dirty" : "",
+            PROJECT_BUILD_TIMESTAMP);
     SDL_Window *window =
         SDL_CreateWindow(title, 800, 600, SDL_WINDOW_FULLSCREEN);
 

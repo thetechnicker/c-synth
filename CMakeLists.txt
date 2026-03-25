@@ -25,6 +25,8 @@ endif()
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
 
+set(PROJECT_NAME "${PROJECT_NAME}")
+
 # --- Git metadata via `git describe` ---
 find_package(Git QUIET)
 

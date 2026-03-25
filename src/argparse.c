@@ -1,5 +1,7 @@
 // argparse.c
 #include "argparse.h"
+#include "log.h"
+#include "version.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -8,23 +10,6 @@
 #include <stdio.h> /* only for snprintf for error messages */
 #include <stdlib.h>
 #include <string.h>
-
-/* Helper: populate ArgParseError if non-NULL */
-static void set_err(ArgParseError *err, ArgParseErrCode code,
-                    const char *msg_fmt, ...) {
-    if (!err)
-        return;
-    err->code = code;
-    /* Build a small message buffer */
-    static char buf[512];
-    va_list ap;
-    va_start(ap, msg_fmt);
-    vsnprintf(buf, sizeof(buf), msg_fmt, ap);
-    va_end(ap);
-    err->msg = buf;
-    err->file = __FILE__;
-    err->line = __LINE__;
-}
 
 /* effective_abrv — same logic as before */
 static char effective_abrv(bool has_abrv, char overwrite_abrv,
@@ -36,24 +21,23 @@ static char effective_abrv(bool has_abrv, char overwrite_abrv,
     return (char)tolower((unsigned char)long_name[0]);
 }
 
-/* parse_value with errno checks; on error returns non-zero and sets err if
- * present */
+/* parse_value with errno-style return codes; on error returns a non-zero
+ * POSIX errno (EINVAL for invalid token/format, ERANGE for out-of-range).
+ */
 static int parse_value_checked(const char *token, ValueType type,
-                               Value *out_val, ArgParseError *err) {
-    if (!token) {
-        set_err(err, APERR_INVALID_ARG, "internal: null token");
-        return -1;
-    }
+                               Value *out_val) {
+    if (!token)
+        return EINVAL;
 
     switch (type) {
     case VAL_FLOAT: {
         char *end = NULL;
         errno = 0;
         float f = strtof(token, &end);
-        if (end == token || *end != '\0' || errno == ERANGE) {
-            set_err(err, APERR_OTHER, "expected <float>, got '%s'", token);
-            return -1;
-        }
+        if (end == token || *end != '\0')
+            return EINVAL;
+        if (errno == ERANGE)
+            return ERANGE;
         if (out_val) {
             out_val->type = VAL_FLOAT;
             out_val->val.f = f;
@@ -64,11 +48,12 @@ static int parse_value_checked(const char *token, ValueType type,
         char *end = NULL;
         errno = 0;
         long l = strtol(token, &end, 0);
-        if (end == token || *end != '\0' || errno == ERANGE || l < INT_MIN ||
-            l > INT_MAX) {
-            set_err(err, APERR_OTHER, "expected <int>, got '%s'", token);
-            return -1;
-        }
+        if (end == token || *end != '\0')
+            return EINVAL;
+        if (errno == ERANGE)
+            return ERANGE;
+        if (l < INT_MIN || l > INT_MAX)
+            return ERANGE;
         if (out_val) {
             out_val->type = VAL_INT;
             out_val->val.i = (int)l;
@@ -76,11 +61,8 @@ static int parse_value_checked(const char *token, ValueType type,
         return 0;
     }
     case VAL_CHAR:
-        if (strlen(token) != 1) {
-            set_err(err, APERR_OTHER, "expected a single <char>, got '%s'",
-                    token);
-            return -1;
-        }
+        if (strlen(token) != 1)
+            return EINVAL;
         if (out_val) {
             out_val->type = VAL_CHAR;
             out_val->val.c = token[0];
@@ -106,13 +88,11 @@ static int parse_value_checked(const char *token, ValueType type,
             }
             return 0;
         } else {
-            set_err(err, APERR_OTHER,
-                    "expected <bool> (true/false/1/0), got '%s'", token);
-            return -1;
+            return EINVAL;
         }
+    default:
+        return EINVAL;
     }
-    set_err(err, APERR_OTHER, "unknown value type");
-    return -1;
 }
 
 /* Helper to count positional index (for messages) */
@@ -127,22 +107,17 @@ static size_t positional_index_of(const ArgDef *defs, size_t n, size_t idx) {
     return pnum;
 }
 
-ArgParseErrCode add_element(ArgParse *ap, ArgDef **out_slot,
-                            ArgParseError *err) {
-    if (!ap || !out_slot) {
-        set_err(err, APERR_INVALID_ARG, "add_element: null ap or out_slot");
-        return APERR_INVALID_ARG;
-    }
+/* return 0 on success, or a POSIX errno on failure */
+static int add_element(ArgParse *ap, ArgDef **out_slot) {
+    if (!ap || !out_slot)
+        return EINVAL;
 
     /* ensure capacity */
     if (ap->len >= ap->cap) {
         size_t new_cap = ap->cap ? ap->cap * 2 : 4;
         ArgDef *new_args = realloc(ap->args, new_cap * sizeof *new_args);
-        if (!new_args) {
-            set_err(err, APERR_OOM,
-                    "add_element: out of memory (resize to %zu)", new_cap);
-            return APERR_OOM;
-        }
+        if (!new_args)
+            return ENOMEM;
 
         /* zero the newly allocated region */
         if (new_cap > ap->cap) {
@@ -159,35 +134,28 @@ ArgParseErrCode add_element(ArgParse *ap, ArgDef **out_slot,
     *out_slot = &ap->args[ap->len++];
     memset(*out_slot, 0, sizeof **out_slot);
 
-    set_err(err, APERR_OK, "ok");
-    return APERR_OK;
+    return 0;
 }
 
-ArgParseErrCode argparse_init(ArgParse *ap, size_t capacity,
-                              ArgParseError *err) {
-    if (!ap) {
-        set_err(err, APERR_INVALID_ARG, "argparse_init: null ap");
-        return APERR_INVALID_ARG;
-    }
+int argparse_init(ArgParse *ap, const char *app_name, const char *usage,
+                  const char *description, size_t capacity) {
+    if (!ap)
+        return EINVAL;
     if (capacity == 0)
         capacity = 4;
 
     ArgDef *slots = malloc(sizeof *slots * capacity);
-    if (!slots) {
-        set_err(err, APERR_OOM,
-                "argparse_init: out of memory allocating %zu slots", capacity);
-        return APERR_OOM;
-    }
+    if (!slots)
+        return ENOMEM;
 
-    /* zero the array so entries start in a well-defined state */
     memset(slots, 0, sizeof *slots * capacity);
-
+    ap->app_name = app_name;
+    ap->usage = usage;
+    ap->description = description;
     ap->args = slots;
     ap->len = 0;
     ap->cap = capacity;
-
-    set_err(err, APERR_OK, "ok");
-    return APERR_OK;
+    return 0;
 }
 
 void argparse_free(ArgParse *ap) {
@@ -199,20 +167,19 @@ void argparse_free(ArgParse *ap) {
     ap->cap = 0;
 }
 
-/* Builder functions */
+/* Builder functions now return 0 on success or a POSIX errno. */
 
-ArgParseErrCode add_kw_argument(ArgParse *ap, const char *label, bool has_abrv,
-                                char overwrite_abrv, ValueType type, Value *out,
-                                bool required, ArgParseError *err) {
+int add_kw_argument(ArgParse *ap, const char *label, bool has_abrv,
+                    char overwrite_abrv, ValueType type, Value *out,
+                    bool required) {
     ArgDef *slot;
-    ArgParseErrCode err_c = add_element(ap, &slot, err);
-    if (err_c != APERR_OK)
-        return err_c;
+    int rc = add_element(ap, &slot);
+    if (rc)
+        return rc;
 
-    if (!slot || !label) {
-        set_err(err, APERR_INVALID_ARG, "add_kw_argument: null slot or label");
-        return APERR_INVALID_ARG;
-    }
+    if (!slot || !label)
+        return EINVAL;
+
     slot->type = ARG_KEYWORD;
     slot->keyword.long_name = (char *)label;
     slot->keyword.has_abrv = has_abrv;
@@ -220,66 +187,55 @@ ArgParseErrCode add_kw_argument(ArgParse *ap, const char *label, bool has_abrv,
     slot->keyword.type = type;
     slot->keyword.out = out;
     slot->keyword.required = required;
-    if (err)
-        set_err(err, APERR_OK, "ok");
-    return APERR_OK;
+    return 0;
 }
 
-ArgParseErrCode add_flag(ArgParse *ap, const char *label, bool has_abrv,
-                         char overwrite_abrv, bool *out, bool required,
-                         ArgParseError *err) {
+int add_flag(ArgParse *ap, const char *label, bool has_abrv,
+             char overwrite_abrv, bool *out, bool required) {
     ArgDef *slot;
-    ArgParseErrCode err_c = add_element(ap, &slot, err);
-    if (err_c != APERR_OK)
-        return err_c;
+    int rc = add_element(ap, &slot);
+    if (rc)
+        return rc;
 
-    if (!slot || !label) {
-        set_err(err, APERR_INVALID_ARG, "add_flag: null slot or label");
-        return APERR_INVALID_ARG;
-    }
+    if (!slot || !label)
+        return EINVAL;
+
     slot->type = ARG_FLAG;
     slot->flag.long_name = (char *)label;
     slot->flag.has_abrv = has_abrv;
     slot->flag.overwrite_abrv = overwrite_abrv;
     slot->flag.out = out;
     slot->flag.required = required;
-    if (err)
-        set_err(err, APERR_OK, "ok");
-    return APERR_OK;
+    return 0;
 }
 
-ArgParseErrCode add_positional_argument(ArgParse *ap, ValueType type,
-                                        Value *out, bool required,
-                                        ArgParseError *err) {
+int add_positional_argument(ArgParse *ap, ValueType type, Value *out,
+                            bool required) {
     ArgDef *slot;
-    ArgParseErrCode err_c = add_element(ap, &slot, err);
-    if (err_c != APERR_OK)
-        return err_c;
+    int rc = add_element(ap, &slot);
+    if (rc)
+        return rc;
 
-    if (!slot) {
-        set_err(err, APERR_INVALID_ARG, "add_positional_argument: null slot");
-        return APERR_INVALID_ARG;
-    }
+    if (!slot)
+        return EINVAL;
+
     slot->type = ARG_POSITIONAL;
     slot->positional.type = type;
     slot->positional.out = out;
     slot->positional.required = required;
-    if (err)
-        set_err(err, APERR_OK, "ok");
-    return APERR_OK;
+    return 0;
 }
 
-ArgParseErrCode add_flaglist(ArgParse *ap, const char *label, uint32_t *out,
-                             bool required, ArgParseError *err) {
+int add_flaglist(ArgParse *ap, const char *label, uint32_t *out,
+                 bool required) {
     ArgDef *slot;
-    ArgParseErrCode err_c = add_element(ap, &slot, err);
-    if (err_c != APERR_OK)
-        return err_c;
+    int rc = add_element(ap, &slot);
+    if (rc)
+        return rc;
 
-    if (!slot || !label) {
-        set_err(err, APERR_INVALID_ARG, "add_flaglist: null slot or label");
-        return APERR_INVALID_ARG;
-    }
+    if (!slot || !label)
+        return EINVAL;
+
     slot->type = ARG_FLAG_LIST;
     slot->flag_list.list_name = (char *)label;
     slot->flag_list.count = 0;
@@ -288,54 +244,41 @@ ArgParseErrCode add_flaglist(ArgParse *ap, const char *label, uint32_t *out,
 
     if (out)
         *out = 0;
-    if (err)
-        set_err(err, APERR_OK, "ok");
-    return APERR_OK;
+    return 0;
 }
 
-ArgParseErrCode add_flaglist_flag(ArgParse *ap, const char *flag_label,
-                                  const char *list_label, bool has_abrv,
-                                  char overwrite_abrv, ArgParseError *err) {
+int add_flaglist_flag(ArgParse *ap, const char *flag_label,
+                      const char *list_label, bool has_abrv,
+                      char overwrite_abrv) {
+    if (!ap || !ap->args || !flag_label || !list_label)
+        return EINVAL;
+
     ArgDef *defs = ap->args;
     size_t ndefs = ap->len;
 
-    if (!defs || !flag_label || !list_label) {
-        set_err(err, APERR_INVALID_ARG, "add_flaglist_flag: null parameter");
-        return APERR_INVALID_ARG;
-    }
-
-    /* find the FlagList by matching its stored label. We used
-     * flags[0].long_name */
     for (size_t i = 0; i < ndefs; i++) {
         if (defs[i].type != ARG_FLAG_LIST)
             continue;
-        const char *lbl = defs[i].flag_list.flags[0].long_name;
+        const char *lbl = defs[i].flag_list.list_name;
         if (!lbl)
             continue;
         if (strcmp(lbl, list_label) == 0) {
             uint32_t cnt = defs[i].flag_list.count;
-            if (cnt >= 32) {
-                set_err(err, APERR_OVERFLOW, "flaglist '%s' is full",
-                        list_label);
-                return APERR_OVERFLOW;
-            }
-            /* Place new entry at index cnt (first real entry at 0) */
+            if (cnt >= 32)
+                return EOVERFLOW;
             defs[i].flag_list.flags[cnt].long_name = (char *)flag_label;
             defs[i].flag_list.flags[cnt].has_abrv = has_abrv;
             defs[i].flag_list.flags[cnt].overwrite_abrv = overwrite_abrv;
             defs[i].flag_list.count = cnt + 1;
-            if (err)
-                set_err(err, APERR_OK, "ok");
-            return APERR_OK;
+            return 0;
         }
     }
 
-    set_err(err, APERR_NOT_FOUND, "flaglist '%s' not found", list_label);
-    return APERR_NOT_FOUND;
+    return ENOENT;
 }
 
-/* Helper: valtype_name for help / messages (kept internal) */
-static const char *valtype_name(ValueType t) {
+/* Helper: valtype_name unchanged and internal */
+static const char *valuetype_name(ValueType t) {
     switch (t) {
     case VAL_FLOAT:
         return "float";
@@ -351,27 +294,171 @@ static const char *valtype_name(ValueType t) {
     return "?";
 }
 
-/* argparse_parse: no exits, no printing. Returns SDL_AppResult. */
-SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap,
-                             ArgParseError *err) {
-    if (!argv || !ap->args) {
-        set_err(err, APERR_INVALID_ARG, "argparse_parse: null argv or defs");
+/* Print help/usage for an ArgParse definition.
+ * - out: destination (eg. stdout or stderr)
+ * - progname: program name to show in usage (if NULL use "program")
+ * - ap: pointer to ArgParse (must be initialized)
+ */
+void argparse_print_help(FILE *out, const char *progname, const ArgParse *ap) {
+    if (!out || !ap)
+        return;
+    const char *pname =
+        progname ? progname : (ap->app_name ? ap->app_name : "program");
+
+    /* Header / usage */
+    fprintf(out, "Usage: %s", pname);
+    if (ap->usage && ap->usage[0]) {
+        fprintf(out, " %s\n\n", ap->usage);
+    } else {
+        /* show simple usage synopsis: flags and positionals */
+        for (size_t i = 0; i < ap->len; ++i) {
+            ArgDef *d = &ap->args[i];
+            switch (d->type) {
+            case ARG_FLAG:
+                if (d->flag.required)
+                    fprintf(out, " --%s",
+                            d->flag.long_name ? d->flag.long_name : "flag");
+                else
+                    fprintf(out, " [--%s]",
+                            d->flag.long_name ? d->flag.long_name : "flag");
+                break;
+            case ARG_KEYWORD:
+                if (d->keyword.required)
+                    fprintf(out, " --%s <%s>",
+                            d->keyword.long_name ? d->keyword.long_name : "opt",
+                            valuetype_name(d->keyword.type));
+                else
+                    fprintf(out, " [--%s <%s>]",
+                            d->keyword.long_name ? d->keyword.long_name : "opt",
+                            valuetype_name(d->keyword.type));
+                break;
+            case ARG_POSITIONAL:
+                if (d->positional.required)
+                    fprintf(out, " <%s>", valuetype_name(d->positional.type));
+                else
+                    fprintf(out, " [<%s>]", valuetype_name(d->positional.type));
+                break;
+            case ARG_FLAG_LIST:
+                if (d->flag_list.required)
+                    fprintf(out, " --%s",
+                            d->flag_list.list_name ? d->flag_list.list_name
+                                                   : "flags");
+                else
+                    fprintf(out, " [--%s]",
+                            d->flag_list.list_name ? d->flag_list.list_name
+                                                   : "flags");
+                break;
+            }
+        }
+        fprintf(out, "\n\n");
+    }
+
+    /* Description (if provided) */
+    if (ap->description && ap->description[0]) {
+        fprintf(out, "%s\n\n", ap->description);
+    }
+
+    fprintf(out, "Options:\n");
+    for (size_t i = 0; i < ap->len; ++i) {
+        ArgDef *d = &ap->args[i];
+        switch (d->type) {
+        case ARG_FLAG: {
+            const char *lname = d->flag.long_name ? d->flag.long_name : "";
+            char abrvbuf[8] = "";
+            if (d->flag.has_abrv) {
+                abrvbuf[0] = '-';
+                abrvbuf[1] =
+                    d->flag.overwrite_abrv ? d->flag.overwrite_abrv : '\0';
+                abrvbuf[2] = '\0';
+            }
+            fprintf(out, "  --%s", lname);
+            if (abrvbuf[1])
+                fprintf(out, ", %s", abrvbuf);
+            fprintf(out, "\t(FLAG)%s\n", d->flag.required ? " [required]" : "");
+            break;
+        }
+        case ARG_KEYWORD: {
+            const char *lname =
+                d->keyword.long_name ? d->keyword.long_name : "";
+            char abrvbuf[8] = "";
+            if (d->keyword.has_abrv) {
+                abrvbuf[0] = '-';
+                abrvbuf[1] = d->keyword.overwrite_abrv
+                                 ? d->keyword.overwrite_abrv
+                                 : '\0';
+                abrvbuf[2] = '\0';
+            }
+            fprintf(out, "  --%s <%s>", lname, valuetype_name(d->keyword.type));
+            if (abrvbuf[1])
+                fprintf(out, ", %s", abrvbuf);
+            fprintf(out, "\t(KEYWORD)%s\n",
+                    d->keyword.required ? " [required]" : "");
+            break;
+        }
+        case ARG_POSITIONAL: {
+            fprintf(out, "  <%s>\t(POSITIONAL)%s\n",
+                    valuetype_name(d->positional.type),
+                    d->positional.required ? " [required]" : "");
+            break;
+        }
+        case ARG_FLAG_LIST: {
+            const char *lname =
+                d->flag_list.list_name ? d->flag_list.list_name : "";
+            fprintf(out, "  --%s\t(FLAG LIST)%s\n", lname,
+                    d->flag_list.required ? " [required]" : "");
+            /* list entries */
+            for (uint32_t j = 0; j < d->flag_list.count; ++j) {
+                FlagEntry *fe = &d->flag_list.flags[j];
+                if (!fe->long_name)
+                    continue;
+                char abrvbuf[8] = "";
+                if (fe->has_abrv) {
+                    abrvbuf[0] = '-';
+                    abrvbuf[1] = fe->overwrite_abrv ? fe->overwrite_abrv : '\0';
+                    abrvbuf[2] = '\0';
+                }
+                fprintf(out, "    --%s", fe->long_name);
+                if (abrvbuf[1])
+                    fprintf(out, ", %s", abrvbuf);
+                fprintf(out, "\n");
+            }
+            break;
+        }
+        }
+    }
+
+    fprintf(out, "Version: %s (%s)%s, built: %s", PROJECT_GIT_DESCRIBE,
+            PROJECT_GIT_COMMIT, PROJECT_GIT_DIRTY ? "-dirty" : "",
+            PROJECT_BUILD_TIMESTAMP);
+    fflush(out);
+}
+
+/* argparse_parse: logs errors internally using LOGE/LOGW; still returns
+ * SDL_AppResult and sets errno for caller to inspect.
+ */
+SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap) {
+    if (!argv || !ap || !ap->args) {
+        errno = EINVAL;
+        LOGE("argparse_parse: null argv or defs (%s)", strerror(errno));
         return SDL_APP_FAILURE;
     }
 
     bool *matched = calloc(ap->len, sizeof(bool));
     if (!matched) {
-        set_err(err, APERR_OOM, "out of memory");
+        errno = ENOMEM;
+        LOGE("argparse_parse: calloc failed (%s)", strerror(errno));
         return SDL_APP_FAILURE;
     }
 
-    /* collect positional-def indices */
     size_t *pos_defs = malloc(ap->len * sizeof(size_t));
     if (!pos_defs) {
         free(matched);
-        set_err(err, APERR_OOM, "out of memory");
+        errno = ENOMEM;
+        LOGE("argparse_parse: malloc for pos_defs failed (%s)",
+             strerror(errno));
         return SDL_APP_FAILURE;
     }
+
     size_t pos_def_count = 0;
     for (size_t i = 0; i < ap->len; i++) {
         if (ap->args[i].type == ARG_POSITIONAL)
@@ -384,23 +471,23 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap,
         if (!tok)
             continue;
 
-        /* built-in help: don't print here; return SDL_APP_EXIT so caller
-         * may exit(0) */
         if (strcmp(tok, "--help") == 0 || strcmp(tok, "-h") == 0) {
             free(matched);
             free(pos_defs);
-            if (err)
-                set_err(err, APERR_OK, "help requested");
+            errno = 0;
+            argparse_print_help(stdout, PROJECT_NAME, ap);
+            // LOGI("argparse_parse: help requested");
             return SDL_APP_SUCCESS;
         }
 
-        /* long option */
         if (tok[0] == '-' && tok[1] == '-') {
             const char *name_start = tok + 2;
             if (*name_start == '\0') {
                 free(matched);
                 free(pos_defs);
-                set_err(err, APERR_INVALID_ARG, "bare '--' is not supported");
+                errno = EINVAL;
+                LOGE("argparse_parse: bare '--' is not supported (%s)",
+                     strerror(errno));
                 return SDL_APP_FAILURE;
             }
             const char *eq = strchr(name_start, '=');
@@ -414,25 +501,32 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap,
                 switch (d->type) {
                 case ARG_KEYWORD: {
                     const KeywordArg *k = &d->keyword;
-                    if (strncmp(k->long_name, name_start, name_len) == 0 &&
+                    if (k->long_name &&
+                        strncmp(k->long_name, name_start, name_len) == 0 &&
                         k->long_name[name_len] == '\0') {
                         const char *valstr = inline_val;
                         if (!valstr) {
                             if (ai + 1 >= argc) {
                                 free(matched);
                                 free(pos_defs);
-                                set_err(err, APERR_OTHER,
-                                        "--%s requires a <%s> value",
-                                        k->long_name, valtype_name(k->type));
+                                errno = EINVAL;
+                                LOGE("argparse_parse: --%s requires a <%s> "
+                                     "value (%s)",
+                                     k->long_name, valuetype_name(k->type),
+                                     strerror(errno));
                                 return SDL_APP_FAILURE;
                             }
                             valstr = argv[++ai];
                         }
                         Value v;
-                        if (parse_value_checked(valstr, k->type, &v, err) !=
-                            0) {
+                        int rc = parse_value_checked(valstr, k->type, &v);
+                        if (rc != 0) {
                             free(matched);
                             free(pos_defs);
+                            errno = rc;
+                            LOGE("argparse_parse: invalid value for --%s: '%s' "
+                                 "(%s)",
+                                 k->long_name, valstr, strerror(errno));
                             return SDL_APP_FAILURE;
                         }
                         if (k->out)
@@ -444,7 +538,8 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap,
                 }
                 case ARG_FLAG: {
                     const Flag *f = &d->flag;
-                    if (strncmp(f->long_name, name_start, name_len) == 0 &&
+                    if (f->long_name &&
+                        strncmp(f->long_name, name_start, name_len) == 0 &&
                         f->long_name[name_len] == '\0') {
                         if (f->out)
                             *f->out = true;
@@ -457,7 +552,8 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap,
                     const FlagList *fl = &d->flag_list;
                     for (uint32_t j = 0; j < fl->count && !found; j++) {
                         const FlagEntry *fe = &fl->flags[j];
-                        if (strncmp(fe->long_name, name_start, name_len) == 0 &&
+                        if (fe->long_name &&
+                            strncmp(fe->long_name, name_start, name_len) == 0 &&
                             fe->long_name[name_len] == '\0') {
                             if (fl->out)
                                 *fl->out |= (1u << j);
@@ -475,12 +571,12 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap,
             if (!found) {
                 free(matched);
                 free(pos_defs);
-                set_err(err, APERR_OTHER, "unknown option '--%.*s'",
-                        (int)name_len, name_start);
+                errno = ENOENT;
+                LOGE("argparse_parse: unknown option '--%.*s' (%s)",
+                     (int)name_len, name_start, strerror(errno));
                 return SDL_APP_FAILURE;
             }
 
-            /* short single-character option: -x */
         } else if (tok[0] == '-' && tok[1] != '\0' && tok[2] == '\0') {
             char ab = tok[1];
             bool found = false;
@@ -496,16 +592,21 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap,
                         if (ai + 1 >= argc) {
                             free(matched);
                             free(pos_defs);
-                            set_err(err, APERR_OTHER,
-                                    "-%c requires a <%s> value", ab,
-                                    valtype_name(k->type));
+                            errno = EINVAL;
+                            LOGE("argparse_parse: -%c requires a <%s> value "
+                                 "(%s)",
+                                 ab, valuetype_name(k->type), strerror(errno));
                             return SDL_APP_FAILURE;
                         }
                         Value v;
-                        if (parse_value_checked(argv[++ai], k->type, &v, err) !=
-                            0) {
+                        int rc = parse_value_checked(argv[++ai], k->type, &v);
+                        if (rc != 0) {
                             free(matched);
                             free(pos_defs);
+                            errno = rc;
+                            LOGE("argparse_parse: invalid value for -%c: '%s' "
+                                 "(%s)",
+                                 ab, argv[ai], strerror(errno));
                             return SDL_APP_FAILURE;
                         }
                         if (k->out)
@@ -550,25 +651,31 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap,
             if (!found) {
                 free(matched);
                 free(pos_defs);
-                set_err(err, APERR_OTHER, "unknown option '-%c'", ab);
+                errno = ENOENT;
+                LOGE("argparse_parse: unknown option '-%c' (%s)", ab,
+                     strerror(errno));
                 return SDL_APP_FAILURE;
             }
 
-            /* positional */
         } else {
             if (pos_filled >= pos_def_count) {
                 free(matched);
                 free(pos_defs);
-                set_err(err, APERR_OTHER, "unexpected positional argument '%s'",
-                        tok);
+                errno = E2BIG;
+                LOGE("argparse_parse: unexpected positional argument '%s' (%s)",
+                     tok, strerror(errno));
                 return SDL_APP_FAILURE;
             }
             size_t di = pos_defs[pos_filled++];
             const PositionalArg *p = &ap->args[di].positional;
             Value v;
-            if (parse_value_checked(tok, p->type, &v, err) != 0) {
+            int rc = parse_value_checked(tok, p->type, &v);
+            if (rc != 0) {
                 free(matched);
                 free(pos_defs);
+                errno = rc;
+                LOGE("argparse_parse: invalid positional value '%s' (%s)", tok,
+                     strerror(errno));
                 return SDL_APP_FAILURE;
             }
             if (p->out)
@@ -577,7 +684,6 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap,
         }
     }
 
-    /* required checks */
     for (size_t i = 0; i < ap->len; i++) {
         if (matched[i])
             continue;
@@ -587,9 +693,10 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap,
             if (d->keyword.required) {
                 free(matched);
                 free(pos_defs);
-                set_err(err, APERR_OTHER,
-                        "required argument '--%s' was not provided",
-                        d->keyword.long_name);
+                errno = EINVAL;
+                LOGE("argparse_parse: required argument '--%s' was not "
+                     "provided (%s)",
+                     d->keyword.long_name, strerror(errno));
                 return SDL_APP_FAILURE;
             }
             break;
@@ -597,20 +704,21 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap,
             if (d->flag.required) {
                 free(matched);
                 free(pos_defs);
-                set_err(err, APERR_OTHER,
-                        "required flag '--%s' was not provided",
-                        d->flag.long_name);
+                errno = EINVAL;
+                LOGE("argparse_parse: required flag '--%s' was not provided "
+                     "(%s)",
+                     d->flag.long_name, strerror(errno));
                 return SDL_APP_FAILURE;
             }
             break;
         case ARG_POSITIONAL:
             if (d->positional.required) {
-                size_t pnum = positional_index_of(ap->args, ap->len, i);
                 free(matched);
                 free(pos_defs);
-                set_err(err, APERR_OTHER,
-                        "required positional argument <%zu> was not provided",
-                        pnum);
+                errno = EINVAL;
+                LOGE("argparse_parse: required positional argument was not "
+                     "provided (%s)",
+                     strerror(errno));
                 return SDL_APP_FAILURE;
             }
             break;
@@ -619,10 +727,12 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap,
                 (d->flag_list.out == NULL || *d->flag_list.out == 0)) {
                 free(matched);
                 free(pos_defs);
-                set_err(err, APERR_OTHER,
-                        "at least one flag from flag-group %zu must be "
-                        "provided",
-                        i);
+                errno = EINVAL;
+                LOGE("argparse_parse: at least one flag from flag-group '%s' "
+                     "must be provided (%s)",
+                     d->flag_list.list_name ? d->flag_list.list_name
+                                            : "(unknown)",
+                     strerror(errno));
                 return SDL_APP_FAILURE;
             }
             break;
@@ -631,7 +741,7 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap,
 
     free(matched);
     free(pos_defs);
-    if (err)
-        set_err(err, APERR_OK, "ok");
+    errno = 0;
+    LOGI("argparse_parse: arguments parsed successfully");
     return SDL_APP_CONTINUE;
 }

@@ -18,12 +18,17 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
 
     ArgParse *ap = malloc(sizeof(ArgParse));
     CHECK_ERR_SDL(argparse_init(ap, "C-Synth", NULL, NULL, 0));
-    create_app_argparse(ap);
+    AppConfig_t *conf = malloc(sizeof(AppConfig_t));
+    memset(conf, 0, sizeof(AppConfig_t));
+    create_app_argparse(ap, conf);
 
     SDL_AppResult res = argparse_parse(argc, argv, ap);
     if (res != SDL_APP_CONTINUE) {
         return res;
     }
+    LOGD("%dx%d; %llx", conf->screen_width, conf->screen_height, conf->flags);
+
+    return SDL_APP_SUCCESS;
 
     App_t *app = malloc(sizeof(App_t));
     app->ap = ap;
@@ -50,7 +55,8 @@ failure:
 }
 
 SDL_AppResult SDL_AppIterate(void *appstate) {
-    App_t *app = (App_t *)appstate;
+    (void)appstate;
+    // App_t *app = (App_t *)appstate;
     // PmEvent buffer[32];
     // int count = Pm_Read(app->stream, buffer, 32);
     // if (count < 0) {
@@ -112,7 +118,20 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
     (void)result;
 }
 
-void create_app_argparse(ArgParse *ap){
+void create_app_argparse(ArgParse *ap, AppConfig_t *conf) {
+    Value w = {.type = VAL_INT, .val.i = &conf->screen_width};
+    add_kw_argument(ap, "screen-width", true, 'w', w, false, NULL);
+    Value h = {.type = VAL_INT, .val.i = &conf->screen_height};
+    add_kw_argument(ap, "screen-height", true, 'h', h, false, NULL);
+    add_flaglist(ap, "sdl-window-flags", &conf->flags, false, NULL);
+    add_flaglist_flag(ap, "1", "sdl-window-flags", true, '\0');
+    add_flaglist_flag(ap, "2", "sdl-window-flags", true, '\0');
+    add_flaglist_flag(ap, "3", "sdl-window-flags", true, '\0');
+    add_flaglist_flag(ap, "4", "sdl-window-flags", true, '\0');
+    add_flaglist_flag(ap, "5", "sdl-window-flags", true, '\0');
+    add_flaglist_flag(ap, "6", "sdl-window-flags", true, '\0');
+    add_flaglist_flag(ap, "7", "sdl-window-flags", true, '\0');
+    add_flaglist_flag(ap, "8", "sdl-window-flags", true, '\0');
 }
 
 /*

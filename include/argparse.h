@@ -24,11 +24,11 @@ typedef enum {
 typedef struct {
     ValueType type;
     union {
-        float f;
-        int i;
-        char c;
-        char *s;
-        bool b;
+        float *f;
+        int *i;
+        char *c;
+        char **s;
+        bool *b;
     } val;
 } Value;
 
@@ -37,7 +37,7 @@ typedef struct {
     bool has_abrv;
     char overwrite_abrv;
     ValueType type;
-    Value *out;
+    Value out;
     bool required;
 } KeywordArg;
 
@@ -51,7 +51,7 @@ typedef struct {
 
 typedef struct {
     ValueType type;
-    Value *out;
+    Value out;
     bool required;
 } PositionalArg;
 
@@ -63,9 +63,9 @@ typedef struct {
 
 typedef struct {
     char *list_name;
-    FlagEntry flags[32];
-    uint32_t count;
-    uint32_t *out;
+    FlagEntry flags[64];
+    uint8_t count;
+    uint64_t *out;
     bool required;
 } FlagList;
 
@@ -139,8 +139,8 @@ void argparse_free(ArgParse *ap);
  *  - description: help text shown by --help (may be NULL)
  */
 int add_kw_argument(ArgParse *ap, const char *label, bool has_abrv,
-                    char overwrite_abrv, ValueType type, Value *out,
-                    bool required, const char *description);
+                    char overwrite_abrv, Value out, bool required,
+                    const char *description);
 
 /* initialize/overwrite a slot as a flag argument:
  *  - out: bool* (non-NULL recommended)
@@ -154,15 +154,15 @@ int add_flag(ArgParse *ap, const char *label, bool has_abrv,
  *  - out: Value* (non-NULL recommended)
  *  - description: help text shown by --help (may be NULL)
  */
-int add_positional_argument(ArgParse *ap, ValueType type, Value *out,
-                            bool required, const char *description);
+int add_positional_argument(ArgParse *ap, Value out, bool required,
+                            const char *description);
 
 /* initialize/overwrite a slot as a flaglist:
  *  - out: uint32_t* bitmask (non-NULL recommended)
  *  - count must be set to 0 by builder; entries are added via add_flaglist_flag
  *  - description: help text shown by --help (may be NULL)
  */
-int add_flaglist(ArgParse *ap, const char *label, uint32_t *out, bool required,
+int add_flaglist(ArgParse *ap, const char *label, uint64_t *out, bool required,
                  const char *description);
 
 /* add a flag entry into an existing FlagList in an array of ArgDef:

@@ -40,7 +40,7 @@ static int parse_value_checked(const char *token, ValueType type,
             return ERANGE;
         if (out_val) {
             out_val->type = VAL_FLOAT;
-            out_val->val.f = f;
+            *out_val->val.f = f;
         }
         return 0;
     }
@@ -56,7 +56,7 @@ static int parse_value_checked(const char *token, ValueType type,
             return ERANGE;
         if (out_val) {
             out_val->type = VAL_INT;
-            out_val->val.i = (int)l;
+            *out_val->val.i = (int)l;
         }
         return 0;
     }
@@ -65,20 +65,20 @@ static int parse_value_checked(const char *token, ValueType type,
             return EINVAL;
         if (out_val) {
             out_val->type = VAL_CHAR;
-            out_val->val.c = token[0];
+            *out_val->val.c = token[0];
         }
         return 0;
     case VAL_STRING:
         if (out_val) {
             out_val->type = VAL_STRING;
-            out_val->val.s = (char *)token;
+            *out_val->val.s = (char *)token;
         }
         return 0;
     case VAL_BOOL:
         if (strcmp(token, "true") == 0 || strcmp(token, "1") == 0) {
             if (out_val) {
                 out_val->type = VAL_BOOL;
-                out_val->val.b = true;
+                *out_val->val.b = true;
             }
             return 0;
         } else if (strcmp(token, "false") == 0 || strcmp(token, "0") == 0) {
@@ -96,16 +96,16 @@ static int parse_value_checked(const char *token, ValueType type,
 }
 
 /* Helper to count positional index (for messages) */
-static size_t positional_index_of(const ArgDef *defs, size_t n, size_t idx) {
-    size_t pnum = 0;
-    for (size_t j = 0; j < n; j++) {
-        if (defs[j].type == ARG_POSITIONAL)
-            pnum++;
-        if (j == idx)
-            break;
-    }
-    return pnum;
-}
+// static size_t positional_index_of(const ArgDef *defs, size_t n, size_t idx) {
+//     size_t pnum = 0;
+//     for (size_t j = 0; j < n; j++) {
+//         if (defs[j].type == ARG_POSITIONAL)
+//             pnum++;
+//         if (j == idx)
+//             break;
+//     }
+//     return pnum;
+// }
 
 /* return 0 on success, or a POSIX errno on failure */
 static int add_element(ArgParse *ap, ArgDef **out_slot) {
@@ -170,8 +170,8 @@ void argparse_free(ArgParse *ap) {
 /* Builder functions now return 0 on success or a POSIX errno. */
 
 int add_kw_argument(ArgParse *ap, const char *label, bool has_abrv,
-                    char overwrite_abrv, ValueType type, Value *out,
-                    bool required, const char *description) {
+                    char overwrite_abrv, Value out, bool required,
+                    const char *description) {
     ArgDef *slot;
     int rc = add_element(ap, &slot);
     if (rc)
@@ -185,7 +185,7 @@ int add_kw_argument(ArgParse *ap, const char *label, bool has_abrv,
     slot->keyword.long_name = (char *)label;
     slot->keyword.has_abrv = has_abrv;
     slot->keyword.overwrite_abrv = overwrite_abrv;
-    slot->keyword.type = type;
+    slot->keyword.type = out.type;
     slot->keyword.out = out;
     slot->keyword.required = required;
     return 0;
@@ -212,8 +212,8 @@ int add_flag(ArgParse *ap, const char *label, bool has_abrv,
     return 0;
 }
 
-int add_positional_argument(ArgParse *ap, ValueType type, Value *out,
-                            bool required, const char *description) {
+int add_positional_argument(ArgParse *ap, Value out, bool required,
+                            const char *description) {
     ArgDef *slot;
     int rc = add_element(ap, &slot);
     if (rc)
@@ -224,13 +224,13 @@ int add_positional_argument(ArgParse *ap, ValueType type, Value *out,
 
     slot->type = ARG_POSITIONAL;
     slot->description = description;
-    slot->positional.type = type;
+    slot->positional.type = out.type;
     slot->positional.out = out;
     slot->positional.required = required;
     return 0;
 }
 
-int add_flaglist(ArgParse *ap, const char *label, uint32_t *out, bool required,
+int add_flaglist(ArgParse *ap, const char *label, uint64_t *out, bool required,
                  const char *description) {
     ArgDef *slot;
     int rc = add_element(ap, &slot);
@@ -269,7 +269,7 @@ int add_flaglist_flag(ArgParse *ap, const char *flag_label,
             continue;
         if (strcmp(lbl, list_label) == 0) {
             uint32_t cnt = defs[i].flag_list.count;
-            if (cnt >= 32)
+            if (cnt >= 64)
                 return EOVERFLOW;
             defs[i].flag_list.flags[cnt].long_name = (char *)flag_label;
             defs[i].flag_list.flags[cnt].has_abrv = has_abrv;
@@ -406,8 +406,8 @@ void argparse_print_help(FILE *out, const char *progname, const ArgParse *ap) {
         switch (d->type) {
         case ARG_FLAG: {
             const char *lname = d->flag.long_name ? d->flag.long_name : "";
-            char abrv = effective_abrv(d->flag.has_abrv,
-                                       d->flag.overwrite_abrv, lname);
+            char abrv =
+                effective_abrv(d->flag.has_abrv, d->flag.overwrite_abrv, lname);
             char left[64];
             if (abrv)
                 snprintf(left, sizeof left, "--%s, -%c", lname, abrv);
@@ -553,7 +553,7 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap) {
                             }
                             valstr = argv[++ai];
                         }
-                        Value v;
+                        Value v = k->out;
                         int rc = parse_value_checked(valstr, k->type, &v);
                         if (rc != 0) {
                             free(matched);
@@ -564,8 +564,8 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap) {
                                  k->long_name, valstr, strerror(errno));
                             return SDL_APP_FAILURE;
                         }
-                        if (k->out)
-                            *k->out = v;
+                        // if (k->out)
+                        //     *k->out = v;
                         matched[i] = true;
                         found = true;
                     }
@@ -633,7 +633,7 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap) {
                                  ab, valuetype_name(k->type), strerror(errno));
                             return SDL_APP_FAILURE;
                         }
-                        Value v;
+                        Value v = k->out;
                         int rc = parse_value_checked(argv[++ai], k->type, &v);
                         if (rc != 0) {
                             free(matched);
@@ -644,8 +644,8 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap) {
                                  ab, argv[ai], strerror(errno));
                             return SDL_APP_FAILURE;
                         }
-                        if (k->out)
-                            *k->out = v;
+                        // if (k->out)
+                        //     *k->out = v;
                         matched[i] = true;
                         found = true;
                     }
@@ -703,7 +703,7 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap) {
             }
             size_t di = pos_defs[pos_filled++];
             const PositionalArg *p = &ap->args[di].positional;
-            Value v;
+            Value v = p->out;
             int rc = parse_value_checked(tok, p->type, &v);
             if (rc != 0) {
                 free(matched);
@@ -713,8 +713,8 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap) {
                      strerror(errno));
                 return SDL_APP_FAILURE;
             }
-            if (p->out)
-                *p->out = v;
+            // if (p->out)
+            //     *p->out = v;
             matched[di] = true;
         }
     }

@@ -21,20 +21,13 @@
 typedef struct AppConfig {
     int screen_width;
     int screen_height;
-    union {
-        uint32_t flags;
-        struct {
-            uint32_t fullscreen : 1;
-            uint32_t resizable : 1;
-            uint32_t padding : 30;
-        };
-    };
+    uint64_t flags;
 } AppConfig_t;
 
 typedef struct App {
     SDL_Window *window;
-    PortMidiStream *stream;
     ArgParse *ap;
+    PortMidiStream *stream;
 } App_t;
 
 void create_app_argparse(ArgParse *ap, AppConfig_t *conf);

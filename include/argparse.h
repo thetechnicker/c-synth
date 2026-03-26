@@ -24,49 +24,52 @@ typedef enum {
 typedef struct {
     ValueType type;
     union {
-        float *f;
-        int *i;
-        char *c;
-        char **s;
-        bool *b;
+        float f;
+        int i;
+        char c;
+        char *s;
+        bool b;
     } val;
 } Value;
 
 typedef struct {
     char *long_name;
+    ValueType type;
     bool has_abrv;
     char overwrite_abrv;
-    ValueType type;
-    Value out;
     bool required;
+    Value *default_val;
 } KeywordArg;
 
 typedef struct {
     char *long_name;
+    ValueType type;
     bool has_abrv;
     char overwrite_abrv;
-    bool *out;
     bool required;
+    bool *default_val;
 } Flag;
 
 typedef struct {
     ValueType type;
-    Value out;
     bool required;
+    Value *default_val;
 } PositionalArg;
 
 typedef struct {
     char *long_name;
+    char *description;
     bool has_abrv;
     char overwrite_abrv;
 } FlagEntry;
 
+#define FLAGLIST_MAX_LEN 64
+
 typedef struct {
     char *list_name;
-    FlagEntry flags[64];
+    FlagEntry flags[FLAGLIST_MAX_LEN];
     uint8_t count;
-    uint64_t *out;
-    bool required;
+    uint64_t default_val;
 } FlagList;
 
 typedef enum {
@@ -95,6 +98,16 @@ typedef struct {
     size_t len;
     size_t cap;
 } ArgParse;
+
+typedef struct {
+    const char *name;
+    ArgType type;
+    union {
+        Value v;
+        bool b;
+        uint64_t f;
+    };
+} ArgResult;
 
 /* Error reporting model
  *
@@ -126,8 +139,8 @@ typedef struct {
  * displayed by argparse_print_help. Pass NULL to omit.
  */
 
-int argparse_init(ArgParse *ap, const char *app_name, const char *usage,
-                  const char *description, size_t capacity);
+int argparse_init(ArgParse *ap, const char *app_name, const char *usage, const char *description,
+                  size_t capacity);
 
 void argparse_free(ArgParse *ap);
 
@@ -138,32 +151,29 @@ void argparse_free(ArgParse *ap);
  *  - required: whether presence is mandatory
  *  - description: help text shown by --help (may be NULL)
  */
-int add_kw_argument(ArgParse *ap, const char *label, bool has_abrv,
-                    char overwrite_abrv, Value out, bool required,
-                    const char *description);
+int add_kw_argument(ArgParse *ap, const char *label, const char *description, ValueType type,
+                    bool has_abrv, char overwrite_abrv, bool required, Value *default_val);
 
 /* initialize/overwrite a slot as a flag argument:
  *  - out: bool* (non-NULL recommended)
  *  - description: help text shown by --help (may be NULL)
  */
-int add_flag(ArgParse *ap, const char *label, bool has_abrv,
-             char overwrite_abrv, bool *out, bool required,
-             const char *description);
+int add_flag(ArgParse *ap, const char *label, const char *description, bool has_abrv,
+             char overwrite_abrv, bool required, bool *default_val);
 
 /* initialize/overwrite a slot as a positional argument:
  *  - out: Value* (non-NULL recommended)
  *  - description: help text shown by --help (may be NULL)
  */
-int add_positional_argument(ArgParse *ap, Value out, bool required,
-                            const char *description);
+int add_positional_argument(ArgParse *ap, const char *description, ValueType type, bool required,
+                            Value *default_val);
 
 /* initialize/overwrite a slot as a flaglist:
  *  - out: uint32_t* bitmask (non-NULL recommended)
  *  - count must be set to 0 by builder; entries are added via add_flaglist_flag
  *  - description: help text shown by --help (may be NULL)
  */
-int add_flaglist(ArgParse *ap, const char *label, uint64_t *out, bool required,
-                 const char *description);
+int add_flaglist(ArgParse *ap, const char *label, const char *description, uint64_t default_val);
 
 /* add a flag entry into an existing FlagList in an array of ArgDef:
  *  - ap: ArgParse whose args[] will be searched for the FlagList by its
@@ -177,9 +187,8 @@ int add_flaglist(ArgParse *ap, const char *label, uint64_t *out, bool required,
  *
  * Note: FlagEntry has no description field; per-entry help is not supported.
  */
-int add_flaglist_flag(ArgParse *ap, const char *flag_label,
-                      const char *list_label, bool has_abrv,
-                      char overwrite_abrv);
+int add_flaglist_flag(ArgParse *ap, const char *list_label, const char *flag_label, bool has_abrv,
+                      char overwrite_abrv, bool *default_val);
 
 /* Parser: no longer exits. Returns an SDL_AppResult to indicate what the
  * application should do:

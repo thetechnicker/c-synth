@@ -6,14 +6,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-typedef enum {
-    LOG_TRACE = 0,
-    LOG_DEBUG,
-    LOG_INFO,
-    LOG_WARN,
-    LOG_ERROR,
-    LOG_FATAL
-} log_level_t;
+typedef enum { LOG_TRACE = 0, LOG_DEBUG, LOG_INFO, LOG_WARN, LOG_ERROR, LOG_FATAL } log_level_t;
 
 /* Initialize logger.
  * - filename: path to JSONL file (created/append). Pass NULL to disable file
@@ -33,8 +26,7 @@ void log_set_color(bool enabled);
 void log_set_use_sdl_ticks(bool enabled);
 
 /* Log functions */
-void log_log(log_level_t level, const char *file, int line, const char *fmt,
-             ...);
+void log_log(log_level_t level, const char *file, int line, const char *fmt, ...);
 
 /* Convenience macros capturing file/line */
 #define LOGT(...) log_log(LOG_TRACE, __FILE__, __LINE__, __VA_ARGS__)

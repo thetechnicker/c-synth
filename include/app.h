@@ -6,16 +6,15 @@
 #include <portmidi.h>
 #include <string.h>
 
-#define CHECK_ERR_SDL(err)                                                     \
-    do {                                                                       \
-        int _check_err_val = (err);                                            \
-        if (_check_err_val != 0) {                                             \
-            const char *_check_err_msg = (_check_err_val > 0)                  \
-                                             ? strerror(_check_err_val)        \
-                                             : strerror(errno);                \
-            LOGE("POSIX error %d: %s", _check_err_val, _check_err_msg);        \
-            return SDL_APP_FAILURE;                                            \
-        }                                                                      \
+#define CHECK_ERR_SDL(err)                                                                         \
+    do {                                                                                           \
+        int _check_err_val = (err);                                                                \
+        if (_check_err_val != 0) {                                                                 \
+            const char *_check_err_msg =                                                           \
+                (_check_err_val > 0) ? strerror(_check_err_val) : strerror(errno);                 \
+            LOGE("POSIX error %d: %s", _check_err_val, _check_err_msg);                            \
+            return SDL_APP_FAILURE;                                                                \
+        }                                                                                          \
     } while (0)
 
 typedef struct AppConfig {

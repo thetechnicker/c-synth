@@ -34,11 +34,9 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     app->ap = ap;
 
     char title[MAX_TITLE_LEN];
-    sprintf(title, "Version: %s (%s)%s, built: %s", PROJECT_GIT_DESCRIBE,
-            PROJECT_GIT_COMMIT, PROJECT_GIT_DIRTY ? "-dirty" : "",
-            PROJECT_BUILD_TIMESTAMP);
-    SDL_Window *window =
-        SDL_CreateWindow(title, 800, 600, SDL_WINDOW_FULLSCREEN);
+    sprintf(title, "Version: %s (%s)%s, built: %s", PROJECT_GIT_DESCRIBE, PROJECT_GIT_COMMIT,
+            PROJECT_GIT_DIRTY ? "-dirty" : "", PROJECT_BUILD_TIMESTAMP);
+    SDL_Window *window = SDL_CreateWindow(title, 800, 600, SDL_WINDOW_FULLSCREEN);
 
     if (!window)
         goto failure;
@@ -119,19 +117,36 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
 }
 
 void create_app_argparse(ArgParse *ap, AppConfig_t *conf) {
-    Value w = {.type = VAL_INT, .val.i = &conf->screen_width};
-    add_kw_argument(ap, "screen-width", true, 'w', w, false, NULL);
-    Value h = {.type = VAL_INT, .val.i = &conf->screen_height};
-    add_kw_argument(ap, "screen-height", true, 'h', h, false, NULL);
-    add_flaglist(ap, "sdl-window-flags", &conf->flags, false, NULL);
-    add_flaglist_flag(ap, "1", "sdl-window-flags", true, '\0');
-    add_flaglist_flag(ap, "2", "sdl-window-flags", true, '\0');
-    add_flaglist_flag(ap, "3", "sdl-window-flags", true, '\0');
-    add_flaglist_flag(ap, "4", "sdl-window-flags", true, '\0');
-    add_flaglist_flag(ap, "5", "sdl-window-flags", true, '\0');
-    add_flaglist_flag(ap, "6", "sdl-window-flags", true, '\0');
-    add_flaglist_flag(ap, "7", "sdl-window-flags", true, '\0');
-    add_flaglist_flag(ap, "8", "sdl-window-flags", true, '\0');
+    (void)conf;
+    add_kw_argument(ap, "screen-width", "Size of the window", VAL_INT, true, 'w', false, NULL);
+    add_kw_argument(ap, "screen-height", "", VAL_INT, true, 'h', false, NULL);
+    add_flaglist(ap, "sdl-window-flags", "SDL Window Flags", 0);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_FULLSCREEN           ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_OPENGL               ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_OCCLUDED             ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_HIDDEN               ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_BORDERLESS           ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_RESIZABLE            ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_MINIMIZED            ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_MAXIMIZED            ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_MOUSE_GRABBED        ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_INPUT_FOCUS          ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_MOUSE_FOCUS          ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_EXTERNAL             ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_MODAL                ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_HIGH_PIXEL_DENSITY   ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_MOUSE_CAPTURE        ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_MOUSE_RELATIVE_MODE  ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_ALWAYS_ON_TOP        ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_UTILITY              ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_TOOLTIP              ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_POPUP_MENU           ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_KEYBOARD_GRABBED     ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_FILL_DOCUMENT        ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_VULKAN               ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_METAL                ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_TRANSPARENT          ", true, '\0', NULL);
+    add_flaglist_flag(ap, "sdl-window-flags", "SDL_WINDOW_NOT_FOCUSABLE        ", true, '\0', NULL);
 }
 
 /*

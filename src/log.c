@@ -13,8 +13,7 @@ static bool color_enabled = true;
 static bool use_sdl_ticks = true;
 
 /* ANSI colors */
-static const char *level_names[] = {"TRACE", "DEBUG", "INFO",
-                                    "WARN",  "ERROR", "FATAL"};
+static const char *level_names[] = {"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"};
 static const char *level_colors[] = {
     "\x1b[90m", /* TRACE - bright black */
     "\x1b[36m", /* DEBUG - cyan */
@@ -79,8 +78,7 @@ static void current_time_iso(char *out, size_t outlen) {
     }
 }
 
-void log_log(log_level_t level, const char *file, int line, const char *fmt,
-             ...) {
+void log_log(log_level_t level, const char *file, int line, const char *fmt, ...) {
     if (level < global_min_level)
         return;
     if (!log_mutex) {
@@ -105,11 +103,10 @@ void log_log(log_level_t level, const char *file, int line, const char *fmt,
 
     /* Console output */
     if (color_enabled) {
-        fprintf(stdout, "%s[%s] %s:%d: %s%s\n", level_colors[level],
-                level_names[level], file, line, msg, color_reset);
+        fprintf(stdout, "%s[%s] %s:%d: %s%s\n", level_colors[level], level_names[level], file, line,
+                msg, color_reset);
     } else {
-        fprintf(stdout, "[%s] %s:%d: %s\n", level_names[level], file, line,
-                msg);
+        fprintf(stdout, "[%s] %s:%d: %s\n", level_names[level], file, line, msg);
     }
     fflush(stdout);
 

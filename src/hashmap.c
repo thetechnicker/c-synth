@@ -41,7 +41,7 @@ HashMap *hashmap_new(size_t capacity) {
 /* ------------------------------------------------------------------ */
 /* hashmap_insert                                                      */
 /* ------------------------------------------------------------------ */
-bool hashmap_insert(HashMap *map, const char *key, ArgResult value) {
+bool hashmap_insert(HashMap *map, const char *key, void *value) {
     size_t idx = hash_key(key, map->capacity);
     Entry *chain = map->buckets[idx];
 
@@ -74,7 +74,7 @@ bool hashmap_insert(HashMap *map, const char *key, ArgResult value) {
 /* ------------------------------------------------------------------ */
 /* hashmap_get                                                         */
 /* ------------------------------------------------------------------ */
-ArgResult *hashmap_get(HashMap *map, const char *key) {
+void *hashmap_get(HashMap *map, const char *key) {
     size_t idx = hash_key(key, map->capacity);
 
     for (Entry *e = map->buckets[idx]; e; e = e->next) {

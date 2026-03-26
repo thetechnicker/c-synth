@@ -1,7 +1,6 @@
 #ifndef HASHMAP_H
 #define HASHMAP_H
 
-#include "argparse.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -10,8 +9,8 @@
 /* Internal chain node                                                 */
 /* ------------------------------------------------------------------ */
 typedef struct Entry {
-    char *key;       /* heap-allocated copy of the key           */
-    ArgResult value; /* shallow copy of the inserted ArgResult   */
+    char *key; /* heap-allocated copy of the key           */
+    void *value;
     struct Entry *next;
 } Entry;
 
@@ -25,7 +24,7 @@ typedef struct {
 } HashMap;
 
 /* Callback type used by hashmap_iterate */
-typedef void (*HashMapIterFn)(const char *key, ArgResult *value, void *userdata);
+typedef void (*HashMapIterFn)(const char *key, void *value, void *userdata);
 
 /* ------------------------------------------------------------------ */
 /* API                                                                 */
@@ -43,14 +42,14 @@ HashMap *hashmap_new(size_t capacity);
  * The key is strdup'd; the value is copied by value.
  * @return  true on success, false on allocation failure.
  */
-bool hashmap_insert(HashMap *map, const char *key, ArgResult value);
+bool hashmap_insert(HashMap *map, const char *key, void *value);
 
 /**
  * Look up a key.
  * @return  Pointer to the stored ArgResult, or NULL if not found.
  *          The pointer is valid until the next insert/free on this map.
  */
-ArgResult *hashmap_get(HashMap *map, const char *key);
+void *hashmap_get(HashMap *map, const char *key);
 
 /**
  * Iterate over every entry in the map (order is unspecified).

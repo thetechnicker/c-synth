@@ -1,6 +1,7 @@
 #pragma once
 
 #include "argparse.h"
+#include "hashmap.h"
 #include <SDL3/SDL.h>
 #include <errno.h>
 #include <portmidi.h>
@@ -17,16 +18,10 @@
         }                                                                                          \
     } while (0)
 
-typedef struct AppConfig {
-    int screen_width;
-    int screen_height;
-    uint64_t flags;
-} AppConfig_t;
-
 typedef struct App {
     SDL_Window *window;
-    ArgParse *ap;
     PortMidiStream *stream;
+    HashMap config;
 } App_t;
 
-void create_app_argparse(ArgParse *ap, AppConfig_t *conf);
+void create_app_argparse(ArgParse *ap);

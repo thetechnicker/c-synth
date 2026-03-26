@@ -1,6 +1,7 @@
 #ifndef ARGPARSE_H
 #define ARGPARSE_H
 
+#include "hashmap.h"
 #include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -204,6 +205,6 @@ int add_flaglist_flag(ArgParse *ap, const char *list_label, const char *flag_lab
  * Include <SDL.h> in the translation unit that calls argparse_parse so that
  * SDL_AppResult is defined appropriately for your SDL version.
  */
-SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap);
+SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap, HashMap *result);
 
 #endif /* ARGPARSE_H */

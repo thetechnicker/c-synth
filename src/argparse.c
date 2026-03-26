@@ -447,14 +447,12 @@ void argparse_print_help(FILE *out, const char *progname, const ArgParse *ap) {
 /* argparse_parse: logs errors internally using LOGE/LOGW; still returns
  * SDL_AppResult and sets errno for caller to inspect.
  */
-SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap) {
-    if (!argv || !ap || !ap->args) {
+SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap, HashMap *result) {
+    if (!argv || !ap || !ap->args || !result) {
         errno = EINVAL;
         LOGE("argparse_parse: null argv or defs (%s)", strerror(errno));
         return SDL_APP_FAILURE;
     }
-
-    HashMap *map = hashmap_new(0);
 
     bool *matched = calloc(ap->len, sizeof(bool));
     if (!matched) {
@@ -490,248 +488,18 @@ SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap) {
             argparse_print_help(stdout, NULL, ap);
             return SDL_APP_SUCCESS;
         }
-
-        if (tok[0] == '-' && tok[1] == '-') {
-            const char *name_start = tok + 2;
-            if (*name_start == '\0') {
-                free(matched);
-                free(pos_defs);
-                errno = EINVAL;
-                LOGE("argparse_parse: bare '--' is not supported (%s)", strerror(errno));
-                return SDL_APP_FAILURE;
-            }
-            const char *eq = strchr(name_start, '=');
-            size_t name_len = eq ? (size_t)(eq - name_start) : strlen(name_start);
-            const char *inline_val = eq ? eq + 1 : NULL;
-
-            bool found = false;
-            ArgResult res;
-            for (size_t i = 0; i < ap->len && !found; i++) {
-                const ArgDef *d = &ap->args[i];
-                switch (d->type) {
-                case ARG_KEYWORD: {
-                    const KeywordArg *k = &d->keyword;
-                    if (k->long_name && strncmp(k->long_name, name_start, name_len) == 0 &&
-                        k->long_name[name_len] == '\0') {
-                        const char *valstr = inline_val;
-                        if (!valstr) {
-                            if (ai + 1 >= argc) {
-                                free(matched);
-                                free(pos_defs);
-                                errno = EINVAL;
-                                LOGE("argparse_parse: --%s requires a <%s> "
-                                     "value (%s)",
-                                     k->long_name, valuetype_name(k->type), strerror(errno));
-                                return SDL_APP_FAILURE;
-                            }
-                            valstr = argv[++ai];
-                        }
-                        Value v;
-                        int rc = parse_value_checked(valstr, k->type, &v);
-                        if (rc != 0) {
-                            free(matched);
-                            free(pos_defs);
-                            errno = rc;
-                            LOGE("argparse_parse: invalid value for --%s: '%s' "
-                                 "(%s)",
-                                 k->long_name, valstr, strerror(errno));
-                            return SDL_APP_FAILURE;
-                        }
-
-                        res.name = k->long_name;
-                        res.type = ARG_KEYWORD;
-                        res.v = v;
-
-                        matched[i] = true;
-                        found = true;
-                    }
-                    break;
-                }
-                case ARG_FLAG: {
-                    const Flag *f = &d->flag;
-                    if (f->long_name && strncmp(f->long_name, name_start, name_len) == 0 &&
-                        f->long_name[name_len] == '\0') {
-
-                        res.name = f->long_name;
-                        res.type = ARG_FLAG;
-                        res.b = true;
-
-                        matched[i] = true;
-                        found = true;
-                    }
-                    break;
-                }
-                case ARG_FLAG_LIST: {
-                    const FlagList *fl = &d->flag_list;
-                    if (fl->list_name && strncmp(fl->list_name, name_start, name_len) == 0 &&
-                        fl->list_name[name_len] == '\0') {
-                    }
-                    break;
-                }
-                case ARG_POSITIONAL:
-                    break;
-                }
-            }
-
-            if (!found) {
-                free(matched);
-                free(pos_defs);
-                errno = ENOENT;
-                LOGE("argparse_parse: unknown option '--%.*s' (%s)", (int)name_len, name_start,
-                     strerror(errno));
-                return SDL_APP_FAILURE;
-            }
-
-            //} else if (tok[0] == '-' && tok[1] != '\0') {
-            //    const char *name_start = tok + 1;
-            //    bool found = false;
-            //    for (size_t i = 0; i < ap->len && !found; i++) {
-            //    }
-
-        } else if (tok[0] == '-' && tok[1] != '\0' && tok[2] == '\0') {
-            char ab = tok[1];
-            bool found = false;
-
-            for (size_t i = 0; i < ap->len && !found; i++) {
-                const ArgDef *d = &ap->args[i];
-                switch (d->type) {
-                case ARG_KEYWORD: {
-                    const KeywordArg *k = &d->keyword;
-                    char eff = effective_abrv(k->has_abrv, k->overwrite_abrv, k->long_name);
-                    if (eff && eff == ab) {
-                        if (ai + 1 >= argc) {
-                            free(matched);
-                            free(pos_defs);
-                            errno = EINVAL;
-                            LOGE("argparse_parse: -%c requires a <%s> value "
-                                 "(%s)",
-                                 ab, valuetype_name(k->type), strerror(errno));
-                            return SDL_APP_FAILURE;
-                        }
-                        Value v;
-                        int rc = parse_value_checked(argv[++ai], k->type, &v);
-                        if (rc != 0) {
-                            free(matched);
-                            free(pos_defs);
-                            errno = rc;
-                            LOGE("argparse_parse: invalid value for -%c: "
-                                 "'%s' "
-                                 "(%s)",
-                                 ab, argv[ai], strerror(errno));
-                            return SDL_APP_FAILURE;
-                        }
-                        // TODO: store in hashmap
-                        matched[i] = true;
-                        found = true;
-                    }
-                    break;
-                }
-                case ARG_FLAG: {
-                    const Flag *f = &d->flag;
-                    char eff = effective_abrv(f->has_abrv, f->overwrite_abrv, f->long_name);
-                    if (eff && eff == ab) {
-                        // TODO: store in hashmap
-                        matched[i] = true;
-                        found = true;
-                    }
-                    break;
-                }
-                case ARG_FLAG_LIST: {
-                    const FlagList *fl = &d->flag_list;
-                    for (uint32_t j = 0; j < fl->count && !found; j++) {
-                        const FlagEntry *fe = &fl->flags[j];
-                        char eff = effective_abrv(fe->has_abrv, fe->overwrite_abrv, fe->long_name);
-                        if (eff && eff == ab) {
-                            // TODO: store in hashmap
-                            matched[i] = true;
-                            found = true;
-                        }
-                    }
-                    break;
-                }
-                case ARG_POSITIONAL:
-                    break;
-                }
-            }
-
-            if (!found) {
-                free(matched);
-                free(pos_defs);
-                errno = ENOENT;
-                LOGE("argparse_parse: unknown option '-%c' (%s)", ab, strerror(errno));
-                return SDL_APP_FAILURE;
-            }
+        int len = strlen(tok);
+        char arg[len];
+        if (sscanf_s(tok, "--%s", arg) == 1) {
+            LOGD("Got full name arg: %s", arg);
+        } else if (sscanf_s(tok, "-%s", arg) == 1) {
+            LOGD("Got abreviated arg: %s", arg);
         } else {
-            if (pos_filled >= pos_def_count) {
-                free(matched);
-                free(pos_defs);
-                errno = E2BIG;
-                LOGE("argparse_parse: unexpected positional argument '%s' "
-                     "(%s)",
-                     tok, strerror(errno));
-                return SDL_APP_FAILURE;
-            }
-            size_t di = pos_defs[pos_filled++];
-            const PositionalArg *p = &ap->args[di].positional;
-            Value v;
-            int rc = parse_value_checked(tok, p->type, &v);
-            if (rc != 0) {
-                free(matched);
-                free(pos_defs);
-                errno = rc;
-                LOGE("argparse_parse: invalid positional value '%s' (%s)", tok, strerror(errno));
-                return SDL_APP_FAILURE;
-            }
-            // TODO: store in hashmap
-            matched[di] = true;
+            LOGD("Got possitional arg: %s", tok);
         }
     }
 
-    for (size_t i = 0; i < ap->len; i++) {
-        if (matched[i])
-            continue;
-        const ArgDef *d = &ap->args[i];
-        switch (d->type) {
-        case ARG_KEYWORD:
-            if (d->keyword.required) {
-                free(matched);
-                free(pos_defs);
-                errno = EINVAL;
-                LOGE("argparse_parse: required argument '--%s' was not "
-                     "provided (%s)",
-                     d->keyword.long_name, strerror(errno));
-                return SDL_APP_FAILURE;
-            }
-            break;
-        case ARG_FLAG:
-            if (d->flag.required) {
-                free(matched);
-                free(pos_defs);
-                errno = EINVAL;
-                LOGE("argparse_parse: required flag '--%s' was not provided "
-                     "(%s)",
-                     d->flag.long_name, strerror(errno));
-                return SDL_APP_FAILURE;
-            }
-            break;
-        case ARG_POSITIONAL:
-            if (d->positional.required) {
-                free(matched);
-                free(pos_defs);
-                errno = EINVAL;
-                LOGE("argparse_parse: required positional argument was not "
-                     "provided (%s)",
-                     strerror(errno));
-                return SDL_APP_FAILURE;
-            }
-            break;
-        case ARG_FLAG_LIST:
-            break;
-        }
-    }
-
-    free(matched);
-    free(pos_defs);
+    return SDL_APP_SUCCESS;
     errno = 0;
     LOGI("argparse_parse: arguments parsed successfully");
     return SDL_APP_CONTINUE;

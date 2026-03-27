@@ -1,7 +1,7 @@
 #include "app.h"
 #include "argparse.h"
 #include "log.h"
-#include "midi.h"
+// #include "midi.h"
 #include "version.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -27,6 +27,10 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     }
 
     App_t *app = malloc(sizeof(App_t));
+    if (!app) {
+        LOGE("Cannot create app: %s", strerror(ENOMEM));
+    }
+    app->config = map;
 
     char title[MAX_TITLE_LEN];
     sprintf(title, "Version: %s (%s)%s, built: %s", PROJECT_GIT_DESCRIBE, PROJECT_GIT_COMMIT,
@@ -107,11 +111,25 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
 }
 
 void SDL_AppQuit(void *appstate, SDL_AppResult result) {
-    (void)appstate;
     (void)result;
+    App_t *app = (App_t *)appstate;
+    LOGD("Exiting");
+    if (app->config) {
+        hashmap_free(app->config);
+    }
+    if (app->stream) {
+        Pm_Close(app->stream);
+    }
+    Pm_Terminate();
+    if (app->window) {
+        SDL_DestroyWindow(app->window);
+    }
+
+    log_shutdown();
 }
 
 void create_app_argparse(ArgParse *ap) {
+    // TODO: some real args, those are just dummy args
     argparse_add_value(ap, "arg0", NULL, false, false, 0, 0);
     argparse_add_value(ap, "arg1", NULL, false, false, 0, 0.0f);
     argparse_add_value(ap, "arg2", NULL, false, false, 0, 'a');

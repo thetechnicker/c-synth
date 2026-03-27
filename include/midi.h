@@ -11,7 +11,8 @@
  * Requires: C11
  */
 
-#pragma once
+#ifndef MIDI_H
+#define MIDI_H
 
 #include <assert.h>
 #include <stddef.h>
@@ -131,3 +132,5 @@ static inline midi_message_t midi_from_uint32(uint32_t pm) {
                      (uint8_t)((pm >> 16) & 0xFFu)         /* data2                   */
     );
 }
+
+#endif

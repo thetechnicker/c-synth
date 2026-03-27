@@ -24,7 +24,7 @@
 
 ### 1.1 Core Abstraction Layer
 
-- [ ] Define `ui_renderer_t` interface struct with function pointers:
+- [~] Define `ui_renderer_t` interface struct with function pointers:
   - `init(width, height, title)` → `bool`
   - `begin_frame()` / `end_frame()`
   - `draw_rect(x, y, w, h, color)`

@@ -1,4 +1,5 @@
-#pragma once
+#ifndef APP_H
+#define APP_H
 
 #include "argparse.h"
 #include "hashmap.h"
@@ -21,7 +22,9 @@
 typedef struct App {
     SDL_Window *window;
     PortMidiStream *stream;
-    HashMap config;
+    HashMap *config;
 } App_t;
 
 void create_app_argparse(ArgParse *ap);
+
+#endif

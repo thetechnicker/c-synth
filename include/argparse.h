@@ -2,92 +2,52 @@
 #define ARGPARSE_H
 
 #include "hashmap.h"
-#include <errno.h>
+#include <SDL3/SDL.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
-
-/* If you use SDL_AppResult, include SDL headers in the translation unit that
- * calls argparse_parse (this header only references the type). */
-#include <SDL3/SDL.h> /* optional here; caller can include instead */
-
-/* Existing Value / ArgDef types (unchanged) --------------------------------*/
+// #include <errno.h>
 
 typedef enum {
-    VAL_FLOAT,
-    VAL_INT,
-    VAL_CHAR,
-    VAL_STRING, /* points into argv[] — valid for the program's lifetime */
-    VAL_BOOL,
-} ValueType;
+    VALUE_INT,
+    VALUE_FLOAT,
+    VALUE_CHAR,
+    VALUE_STR,
+} ValueDataType;
 
 typedef struct {
-    ValueType type;
+    bool positional;
+    bool allow_short;
+    char short_override; // '\0' = auto-derive from name[0]
+    ValueDataType type;
     union {
-        float f;
         int i;
+        float f;
         char c;
         char *s;
-        bool b;
-    } val;
-} Value;
+    };
+} ValueArg;
 
 typedef struct {
-    char *long_name;
-    ValueType type;
-    bool has_abrv;
-    char overwrite_abrv;
-    bool required;
-    Value *default_val;
-} KeywordArg;
-
-typedef struct {
-    char *long_name;
-    ValueType type;
-    bool has_abrv;
-    char overwrite_abrv;
-    bool required;
-    bool *default_val;
-} Flag;
-
-typedef struct {
-    ValueType type;
-    bool required;
-    Value *default_val;
-} PositionalArg;
-
-typedef struct {
-    char *long_name;
-    char *description;
-    bool has_abrv;
-    char overwrite_abrv;
-} FlagEntry;
-
-#define FLAGLIST_MAX_LEN 64
-
-typedef struct {
-    char *list_name;
-    FlagEntry flags[FLAGLIST_MAX_LEN];
-    uint8_t count;
-    uint64_t default_val;
-} FlagList;
+    bool allow_short;
+    char short_override;
+    bool b;
+} FlagArg;
 
 typedef enum {
-    ARG_KEYWORD,
+    ARG_VALUE,
     ARG_FLAG,
-    ARG_POSITIONAL,
-    ARG_FLAG_LIST,
+    // ARG_COMMAND,
 } ArgType;
 
 typedef struct {
     ArgType type;
-    const char *description; /* human-readable help text; may be NULL */
+    const char *name;
+    const char *description;
     union {
-        KeywordArg keyword;
-        Flag flag;
-        PositionalArg positional;
-        FlagList flag_list;
+        FlagArg f;
+        ValueArg v;
     };
 } ArgDef;
 
@@ -96,115 +56,56 @@ typedef struct {
     const char *usage;
     const char *description;
     ArgDef *args;
+    HashMap *fast_look;
     size_t len;
     size_t cap;
 } ArgParse;
 
 typedef struct {
     const char *name;
-    ArgType type;
+    ArgType type; // ARG_FLAG or ARG_VALUE
     union {
-        Value v;
-        bool b;
-        uint64_t f;
+        bool b; // when type == ARG_FLAG
+        struct {
+            ValueDataType dtype;
+            union {
+                int i;
+                float f;
+                char c;
+                char *s;
+            };
+        }; // when type == ARG_VALUE
     };
-} ArgResult;
-
-/* Error reporting model
- *
- * All builder/parser functions now return a POSIX-style error code:
- *   0        : success
- *   ENOMEM   : out of memory
- *   EINVAL   : invalid argument passed to builder
- *   EOVERFLOW: array/full / too many flags in list
- *   ENOENT   : not found (e.g., flaglist label not found)
- *   EFAULT   : type mismatch or bad pointer (best-effort)
- *   other errno values as appropriate
- *
- * Functions do not fill an out-parameter error struct; callers can inspect
- * the returned errno-style code and use strerror() for text.
- */
-
-/* Builder/pipeline API
- *
- * General usage model:
- *   - Allocate an array ArgDef defs[N]; zero-init it.
- *   - Call add_* with &defs[idx], or for add_flaglist_flag supply defs and n to
- *     search for the FlagList by its long_name.
- *   - Builders write into the provided ArgDef slot (overwriting it).
- *
- * NOTE: many parameters are pointer types that must remain valid (e.g. value
- *       pointers and long_name strings) for the lifetime of the parser run.
- *
- * The `description` parameter in each builder is a human-readable help string
- * displayed by argparse_print_help. Pass NULL to omit.
- */
+} ArgParseResult;
 
 int argparse_init(ArgParse *ap, const char *app_name, const char *usage, const char *description,
                   size_t capacity);
 
 void argparse_free(ArgParse *ap);
 
-/* initialize/overwrite a slot as a keyword argument:
- *  - label: long option name (null-terminated)
- *  - has_abrv, overwrite_abrv: as before
- *  - out: Value* (non-NULL recommended) — parser writes only on explicit match
- *  - required: whether presence is mandatory
- *  - description: help text shown by --help (may be NULL)
- */
-int add_kw_argument(ArgParse *ap, const char *label, const char *description, ValueType type,
-                    bool has_abrv, char overwrite_abrv, bool required, Value *default_val);
+int argparse_add_flag(ArgParse *ap, const char *name, const char *description, bool allow_short,
+                      const char short_override, bool default_v);
 
-/* initialize/overwrite a slot as a flag argument:
- *  - out: bool* (non-NULL recommended)
- *  - description: help text shown by --help (may be NULL)
- */
-int add_flag(ArgParse *ap, const char *label, const char *description, bool has_abrv,
-             char overwrite_abrv, bool required, bool *default_val);
+#define argparse_add_value(ap, name, description, possitional, allow_short, short_override, x)     \
+    _Generic((x),                                                                                  \
+        int: argparse_add_value_i,                                                                 \
+        float: argparse_add_value_f,                                                               \
+        char: argparse_add_value_c,                                                                \
+        char *: argparse_add_value_s,                                                              \
+        ValueArg: argparse_add_value_v)(ap, name, description, possitional, allow_short,           \
+                                        short_override, x)
 
-/* initialize/overwrite a slot as a positional argument:
- *  - out: Value* (non-NULL recommended)
- *  - description: help text shown by --help (may be NULL)
- */
-int add_positional_argument(ArgParse *ap, const char *description, ValueType type, bool required,
-                            Value *default_val);
+int argparse_add_value_v(ArgParse *ap, const char *name, const char *description,
+                         ValueArg default_v);
+int argparse_add_value_i(ArgParse *ap, const char *name, const char *description, bool possitional,
+                         bool allow_short, const char short_override, int i);
+int argparse_add_value_f(ArgParse *ap, const char *name, const char *description, bool possitional,
+                         bool allow_short, const char short_override, float f);
+int argparse_add_value_c(ArgParse *ap, const char *name, const char *description, bool possitional,
+                         bool allow_short, const char short_override, char c);
+int argparse_add_value_s(ArgParse *ap, const char *name, const char *description, bool possitional,
+                         bool allow_short, const char short_override, char *s);
 
-/* initialize/overwrite a slot as a flaglist:
- *  - out: uint32_t* bitmask (non-NULL recommended)
- *  - count must be set to 0 by builder; entries are added via add_flaglist_flag
- *  - description: help text shown by --help (may be NULL)
- */
-int add_flaglist(ArgParse *ap, const char *label, const char *description, uint64_t default_val);
-
-/* add a flag entry into an existing FlagList in an array of ArgDef:
- *  - ap: ArgParse whose args[] will be searched for the FlagList by its
- * long_name
- *  - flag_label: long_name for the new flag entry
- *  - list_label: label of the FlagList to which this entry will be added
- *  - has_abrv, overwrite_abrv: as before
- *
- * Returns ENOENT if the FlagList named list_label is not found.
- * Returns EOVERFLOW if the FlagList already has 32 flags.
- *
- * Note: FlagEntry has no description field; per-entry help is not supported.
- */
-int add_flaglist_flag(ArgParse *ap, const char *list_label, const char *flag_label, bool has_abrv,
-                      char overwrite_abrv, bool *default_val);
-
-/* Parser: no longer exits. Returns an SDL_AppResult to indicate what the
- * application should do:
- *   - SDL_APP_CONTINUE (or SDL_APPRETURN_CONTINUE depending on SDL version)
- *       : parsing succeeded and the app should continue running
- *   - SDL_APP_EXIT (application should exit with code 0)
- *   - SDL_APP_EXIT_FAILURE (application should exit with code 1)
- *
- * The function will return non-zero (a POSIX errno) on failure; callers should
- * use the returned errno to decide messaging/termination. The function will
- * not call exit() or print to stderr/stdout.
- *
- * Include <SDL.h> in the translation unit that calls argparse_parse so that
- * SDL_AppResult is defined appropriately for your SDL version.
- */
 SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap, HashMap *result);
 
 #endif /* ARGPARSE_H */

@@ -1,12 +1,10 @@
 #define _GNU_SOURCE
 #include "log.h"
-#include <errno.h>
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
-static FILE *log_file = NULL;
+static SDL_IOStream *log_file = NULL;
 static SDL_Mutex *log_mutex = NULL;
 static log_level_t global_min_level = LOG_DEBUG;
 static bool color_enabled = true;
@@ -27,17 +25,16 @@ static const char *color_reset = "\x1b[0m";
 bool log_init(const char *filename, log_level_t min_level) {
     global_min_level = min_level;
     if (filename) {
-        fopen_s(&log_file, filename, "a");
+        /* SDL_IOFromFile is cross-platform — no fopen_s vs fopen needed. */
+        log_file = SDL_IOFromFile(filename, "a");
         if (!log_file)
             return false;
-        /* set line buffering */
-        setvbuf(log_file, NULL, _IOLBF, 0);
     }
     if (!log_mutex) {
         log_mutex = SDL_CreateMutex();
         if (!log_mutex) {
             if (log_file) {
-                fclose(log_file);
+                SDL_CloseIO(log_file);
                 log_file = NULL;
             }
             return false;
@@ -50,8 +47,8 @@ void log_shutdown(void) {
     if (log_mutex) {
         SDL_LockMutex(log_mutex);
         if (log_file) {
-            fflush(log_file);
-            fclose(log_file);
+            SDL_FlushIO(log_file);
+            SDL_CloseIO(log_file);
             log_file = NULL;
         }
         SDL_UnlockMutex(log_mutex);
@@ -66,24 +63,28 @@ void log_set_use_sdl_ticks(bool enabled) { use_sdl_ticks = enabled; }
 static void current_time_iso(char *out, size_t outlen) {
     if (use_sdl_ticks) {
         uint32_t ms = SDL_GetTicks();
-        /* convert ticks to seconds+ms relative to SDL init */
         uint32_t s = ms / 1000;
         uint32_t rem = ms % 1000;
-        snprintf(out, outlen, "%u.%03u", s, rem);
+        SDL_snprintf(out, outlen, "%u.%03u", s, rem);
     } else {
-        time_t t = time(NULL);
-        struct tm tm;
-        gmtime_s(&tm, &t);
-        strftime(out, outlen, "%Y-%m-%dT%H:%M:%SZ", &tm);
+        /* SDL_GetCurrentTime + SDL_TimeToDateTime replace gmtime_r/gmtime_s. */
+        SDL_Time ticks;
+        SDL_DateTime dt;
+        if (SDL_GetCurrentTime(&ticks) && SDL_TimeToDateTime(ticks, &dt, false)) {
+            SDL_snprintf(out, outlen, "%04d-%02d-%02dT%02d:%02d:%02dZ", dt.year, dt.month, dt.day,
+                         dt.hour, dt.minute, dt.second);
+        } else {
+            SDL_strlcpy(out, "unknown", outlen);
+        }
     }
 }
 
-void log_log(log_level_t level, const char *file, int line, const char *function, const char *fmt,
+void log_log(log_level_t level, const char *file, int line, const char *func, const char *fmt,
              ...) {
     if (level < global_min_level)
         return;
     if (!log_mutex) {
-        /* lazy init default mutex if user forgot to call init */
+        /* lazy init default mutex if user forgot to call log_init */
         log_mutex = SDL_CreateMutex();
         if (!log_mutex)
             return;
@@ -95,7 +96,7 @@ void log_log(log_level_t level, const char *file, int line, const char *function
     char msg[1024];
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(msg, sizeof(msg), fmt, ap);
+    SDL_vsnprintf(msg, sizeof(msg), fmt, ap);
     va_end(ap);
 
     /* time */
@@ -104,20 +105,16 @@ void log_log(log_level_t level, const char *file, int line, const char *function
 
     /* Console output */
     if (color_enabled) {
-        fprintf(stdout, "%s[%s] %s:%d | [%s]: %s%s\n", level_colors[level], level_names[level],
-                file, line, function, msg, color_reset);
+        SDL_Log("%s[%s] %s:%d | [%s]: %s%s", level_colors[level], level_names[level], file, line,
+                func, msg, color_reset);
     } else {
-        fprintf(stdout, "[%s] %s:%d | [%s]: %s\n", level_names[level], file, line, function, msg);
+        SDL_Log("[%s] %s:%d | [%s]: %s", level_names[level], file, line, func, msg);
     }
-    fflush(stdout);
 
     /* JSONL file output */
     if (log_file) {
-        /* keep file entries small; escape JSON string for message */
-        /* simple JSON escaping (handles backslash and quotes and control chars)
-         */
         size_t len = strlen(msg);
-        char *esc = malloc(len * 2 + 1);
+        char *esc = SDL_malloc(len * 2 + 1);
         if (esc) {
             char *p = esc;
             for (size_t i = 0; i < len; ++i) {
@@ -138,8 +135,7 @@ void log_log(log_level_t level, const char *file, int line, const char *function
                     *p++ = '\\';
                     *p++ = 't';
                 } else if (c < 0x20) {
-                    /* control -> \u00XX */
-                    int written = sprintf(p, "\\u%04x", c);
+                    int written = SDL_snprintf(p, 7, "\\u%04x", c);
                     p += written;
                 } else {
                     *p++ = c;
@@ -147,27 +143,25 @@ void log_log(log_level_t level, const char *file, int line, const char *function
             }
             *p = '\0';
 
-            /* file, line, level, time, message, source file */
-            fprintf(log_file,
-                    "{\"ts\":\"%s\",\"level\":\"%s\",\"file\":\"%s\",\"line\":%"
-                    "d,\"msg\":\"%s\"}\n",
-                    ts, level_names[level], file, line, esc);
-            fflush(log_file);
-            free(esc);
+            SDL_IOprintf(
+                log_file,
+                "{\"ts\":\"%s\",\"level\":\"%s\",\"file\":\"%s\",\"line\":%d,\"msg\":\"%s\"}\n", ts,
+                level_names[level], file, line, esc);
+            SDL_FlushIO(log_file);
+            SDL_free(esc);
         } else {
-            /* fallback: write unescaped message */
-            fprintf(log_file,
-                    "{\"ts\":\"%s\",\"level\":\"%s\",\"file\":\"%s\",\"line\":%"
-                    "d,\"msg\":\"%s\"}\n",
-                    ts, level_names[level], file, line, msg);
-            fflush(log_file);
+            SDL_IOprintf(
+                log_file,
+                "{\"ts\":\"%s\",\"level\":\"%s\",\"file\":\"%s\",\"line\":%d,\"msg\":\"%s\"}\n", ts,
+                level_names[level], file, line, msg);
+            SDL_FlushIO(log_file);
         }
     }
 
-    /* If fatal, optionally abort */
     if (level == LOG_FATAL) {
         SDL_UnlockMutex(log_mutex);
         log_shutdown();
+        SDL_Quit();
         abort();
     }
 

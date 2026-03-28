@@ -1,5 +1,6 @@
 #include "hashmap.h"
 
+#include <SDL3/SDL.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -58,7 +59,7 @@ bool hashmap_insert(HashMap *map, const char *key, void *value) {
     if (!node)
         return false;
 
-    node->key = strdup(key);
+    node->key = SDL_strdup(key);
     if (!node->key) {
         free(node);
         return false;

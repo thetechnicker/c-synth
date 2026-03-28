@@ -78,7 +78,8 @@ static void current_time_iso(char *out, size_t outlen) {
     }
 }
 
-void log_log(log_level_t level, const char *file, int line, const char *fmt, ...) {
+void log_log(log_level_t level, const char *file, int line, const char *function, const char *fmt,
+             ...) {
     if (level < global_min_level)
         return;
     if (!log_mutex) {
@@ -103,10 +104,10 @@ void log_log(log_level_t level, const char *file, int line, const char *fmt, ...
 
     /* Console output */
     if (color_enabled) {
-        fprintf(stdout, "%s[%s] %s:%d: %s%s\n", level_colors[level], level_names[level], file, line,
-                msg, color_reset);
+        fprintf(stdout, "%s[%s] %s:%d | [%s]: %s%s\n", level_colors[level], level_names[level],
+                file, line, function, msg, color_reset);
     } else {
-        fprintf(stdout, "[%s] %s:%d: %s\n", level_names[level], file, line, msg);
+        fprintf(stdout, "[%s] %s:%d | [%s]: %s\n", level_names[level], file, line, function, msg);
     }
     fflush(stdout);
 

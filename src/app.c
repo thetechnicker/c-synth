@@ -1,6 +1,7 @@
 #include "app.h"
 #include "argparse.h"
 #include "log.h"
+#include "ui.h"
 // #include "midi.h"
 #include "version.h"
 #include <stdint.h>
@@ -15,6 +16,9 @@
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     log_init("app.log.jsonl", LOG_DEBUG);
+    LOGI("Application is starting up ...");
+    LOGD("Application data at: %s", SDL_GetBasePath());
+    LOGD("Current workdir is: %s", SDL_GetCurrentDirectory());
 
     ArgParse *ap = malloc(sizeof(ArgParse));
     CHECK_ERR_SDL(argparse_init(ap, "C-Synth", NULL, NULL, 0));
@@ -35,25 +39,22 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     char title[MAX_TITLE_LEN];
     sprintf(title, "Version: %s (%s)%s, built: %s", PROJECT_GIT_DESCRIBE, PROJECT_GIT_COMMIT,
             PROJECT_GIT_DIRTY ? "-dirty" : "", PROJECT_BUILD_TIMESTAMP);
-    SDL_Window *window = SDL_CreateWindow(title, 800, 600, SDL_WINDOW_FULLSCREEN);
 
-    if (!window)
-        goto failure;
-
-    app->window = window;
+    app->renderer = ui_get_renderer("sdl3");
+    app->renderer->init(800, 600, title);
 
     *appstate = app;
+    LOGI("Application startup complete");
 
     return SDL_APP_CONTINUE;
-
-failure:
-    free(app);
-    return SDL_APP_FAILURE;
 }
 
 SDL_AppResult SDL_AppIterate(void *appstate) {
     (void)appstate;
-    // App_t *app = (App_t *)appstate;
+    App_t *app = (App_t *)appstate;
+    app->renderer->begin_frame();
+    app->renderer->draw_rect(10, 10, 100, 100, UI_RGB(0, 1, 0));
+    app->renderer->end_frame();
     // PmEvent buffer[32];
     // int count = Pm_Read(app->stream, buffer, 32);
     // if (count < 0) {
@@ -121,19 +122,15 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
         Pm_Close(app->stream);
     }
     Pm_Terminate();
-    if (app->window) {
-        SDL_DestroyWindow(app->window);
+    if (app->renderer) {
+        app->renderer->shutdown();
     }
 
     log_shutdown();
 }
 
 void create_app_argparse(ArgParse *ap) {
-    // TODO: some real args, those are just dummy args
-    argparse_add_value(ap, "arg0", NULL, false, false, 0, 0);
-    argparse_add_value(ap, "arg1", NULL, false, false, 0, 0.0f);
-    argparse_add_value(ap, "arg2", NULL, false, false, 0, 'a');
-    argparse_add_value(ap, "arg3", NULL, false, false, 0, "abc");
+    argparse_add_value(ap, "renderer", "rendering backedn used", false, true, 0, "default");
 }
 
 /*

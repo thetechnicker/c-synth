@@ -26,14 +26,15 @@ void log_set_color(bool enabled);
 void log_set_use_sdl_ticks(bool enabled);
 
 /* Log functions */
-void log_log(log_level_t level, const char *file, int line, const char *fmt, ...);
+void log_log(log_level_t level, const char *file, int line, const char *function, const char *fmt,
+             ...);
 
 /* Convenience macros capturing file/line */
-#define LOGT(...) log_log(LOG_TRACE, __FILE__, __LINE__, __VA_ARGS__)
-#define LOGD(...) log_log(LOG_DEBUG, __FILE__, __LINE__, __VA_ARGS__)
-#define LOGI(...) log_log(LOG_INFO, __FILE__, __LINE__, __VA_ARGS__)
-#define LOGW(...) log_log(LOG_WARN, __FILE__, __LINE__, __VA_ARGS__)
-#define LOGE(...) log_log(LOG_ERROR, __FILE__, __LINE__, __VA_ARGS__)
-#define LOGF(...) log_log(LOG_FATAL, __FILE__, __LINE__, __VA_ARGS__)
+#define LOGT(...) log_log(LOG_TRACE, __FILE__, __LINE__, __func__, __VA_ARGS__)
+#define LOGD(...) log_log(LOG_DEBUG, __FILE__, __LINE__, __func__, __VA_ARGS__)
+#define LOGI(...) log_log(LOG_INFO, __FILE__, __LINE__, __func__, __VA_ARGS__)
+#define LOGW(...) log_log(LOG_WARN, __FILE__, __LINE__, __func__, __VA_ARGS__)
+#define LOGE(...) log_log(LOG_ERROR, __FILE__, __LINE__, __func__, __VA_ARGS__)
+#define LOGF(...) log_log(LOG_FATAL, __FILE__, __LINE__, __func__, __VA_ARGS__)
 
 #endif /* LOG_H */

@@ -93,7 +93,7 @@ configure_file(
 # Ensure generated headers are visible
 include_directories(${GENERATED_INCLUDE_DIR})
 # Optionally install the generated header
-install(DIRECTORY ${GENERATED_INCLUDE_DIR}/ DESTINATION include/synth_generated FILES_MATCHING PATTERN "version.h")
+#install(DIRECTORY ${GENERATED_INCLUDE_DIR}/ DESTINATION include/synth_generated FILES_MATCHING PATTERN "version.h")
 
 # --- Create target ---
 add_executable(synth ${SYNTH_SOURCES})
@@ -135,6 +135,51 @@ endif()
 if(UNIX)
   target_link_libraries(synth PRIVATE m)
 endif()
+
+# Find glslc
+find_program(GLSLC_EXECUTABLE glslc D:/c_cpp_dependencies/shaderc/build/glslc/Release/)
+if(NOT GLSLC_EXECUTABLE)
+  message(FATAL_ERROR "glslc not found (required to compile GLSL -> SPIR-V).")
+endif()
+
+# Shader sources (relative to source tree)
+set(SHADER_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
+file(GLOB SHADER_SOURCES CONFIGURE_DEPENDS
+  ${SHADER_SRC_DIR}/*.vert
+  ${SHADER_SRC_DIR}/*.frag
+)
+
+# Output directory for compiled SPIR-V
+set(SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/shaders")
+file(MAKE_DIRECTORY ${SHADER_OUT_DIR})
+
+set(SHADER_OUTS)
+foreach(SRC IN LISTS SHADER_SOURCES)
+  get_filename_component(NAME ${SRC} NAME)             # e.g. color.vert
+  set(OUT ${SHADER_OUT_DIR}/${NAME}.spv)               # e.g. build/shaders/color.vert.spv
+
+  add_custom_command(
+    OUTPUT ${OUT}
+    COMMAND ${GLSLC_EXECUTABLE} ${SRC} -o ${OUT}
+    DEPENDS ${SRC}
+    COMMENT "Compiling shader ${NAME} -> ${OUT}"
+    VERBATIM
+  )
+
+  list(APPEND SHADER_OUTS ${OUT})
+endforeach()
+
+# Top-level target that builds all shaders
+add_custom_target(shaders ALL DEPENDS ${SHADER_OUTS})
+
+# Ensure synth is built after shaders (so outputs exist for packaging/installation)
+add_dependencies(synth shaders)
+
+# Optionally install compiled shaders
+#install(DIRECTORY ${SHADER_OUT_DIR}/
+#  DESTINATION share/${PROJECT_NAME}/shaders
+#  FILES_MATCHING PATTERN "*.spv"
+#)
 
 # Install binary
 install(TARGETS synth RUNTIME DESTINATION bin)

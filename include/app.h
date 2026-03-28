@@ -3,6 +3,7 @@
 
 #include "argparse.h"
 #include "hashmap.h"
+#include "ui.h"
 #include <SDL3/SDL.h>
 #include <errno.h>
 #include <portmidi.h>
@@ -20,7 +21,7 @@
     } while (0)
 
 typedef struct App {
-    SDL_Window *window;
+    const ui_renderer_t *renderer;
     PortMidiStream *stream;
     HashMap *config;
 } App_t;

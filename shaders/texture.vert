@@ -1,7 +1,7 @@
- // ---- texture.vert ---- (vertex layout: vec2 pos, vec2 uv, vec4 col — stride 32 B)
+// ---- texture.vert ---- (vertex layout: vec2 pos, vec2 uv, vec4 col — stride 32 B)
  
     #version 450
-    layout(push_constant) uniform PC { float inv_w; float inv_h; } pc;
+    layout(set=1, binding=0) uniform PC { float inv_w; float inv_h; } pc;
     layout(location = 0) in  vec2 a_pos;
     layout(location = 1) in  vec2 a_uv;
     layout(location = 2) in  vec4 a_col;

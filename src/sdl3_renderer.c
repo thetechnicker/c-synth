@@ -876,7 +876,7 @@ static bool sdl3_init(int width, int height, const char *title) {
 
     if (gpu_setup()) {
         ctx.path = PATH_GPU;
-        LOGW("using SDL_GPU path");
+        LOGD("using SDL_GPU path");
         return true;
     }
 

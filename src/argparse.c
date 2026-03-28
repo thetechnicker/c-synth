@@ -253,6 +253,17 @@ int argparse_add_value_s(ArgParse *ap, const char *name, const char *description
     return argparse_add_value_v(ap, name, description, v);
 }
 
+// might be usefull
+// int argparse_add_value_n(ArgParse *ap, const char *name, const char *description, bool
+// possitional,
+//                         bool allow_short, const char short_override, ValueDataType t) {
+//    ValueArg v = {.positional = possitional,
+//                  .allow_short = allow_short,
+//                  .short_override = short_override,
+//                  .type = t,
+//                  .s = NULL};
+//}
+
 /* ------------------------------------------------------------------ */
 /* argparse_print_help — improved                                      */
 /* ------------------------------------------------------------------ */

@@ -11,10 +11,15 @@
 #define SDL_MAIN_USE_CALLBACKS
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
+#include <SDL3/SDL_timer.h>
 
 #define MAX_TITLE_LEN 256
 
+uint32_t dt = 0;
+
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
+    // SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO); // idk if this line is needed, no difference found
+    // when uncommented
     log_init("app.log.jsonl", LOG_DEBUG);
     LOGI("Application is starting up ...");
     LOGD("Application data at: %s", SDL_GetBasePath());
@@ -40,7 +45,12 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     sprintf(title, "Version: %s (%s)%s, built: %s", PROJECT_GIT_DESCRIBE, PROJECT_GIT_COMMIT,
             PROJECT_GIT_DIRTY ? "-dirty" : "", PROJECT_BUILD_TIMESTAMP);
 
-    app->renderer = ui_get_renderer("sdl3");
+    const char *renderer = hashmap_get(app->config, "renderer");
+    if (!renderer || strcmp(renderer, "default")) {
+        app->renderer = ui_get_default_renderer();
+    } else {
+        app->renderer = ui_get_renderer(renderer);
+    }
     app->renderer->init(800, 600, title);
 
     *appstate = app;
@@ -50,48 +60,14 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
 }
 
 SDL_AppResult SDL_AppIterate(void *appstate) {
-    (void)appstate;
     App_t *app = (App_t *)appstate;
+    uint32_t s = SDL_GetTicks();
     app->renderer->begin_frame();
-    app->renderer->draw_rect(10, 10, 100, 100, UI_RGB(0, 1, 0));
+    app->renderer->draw_rect(350, 250, 100, 100, UI_RGB(0, 255, 128));
     app->renderer->end_frame();
-    // PmEvent buffer[32];
-    // int count = Pm_Read(app->stream, buffer, 32);
-    // if (count < 0) {
-    //     fprintf(stderr, "Pm_Read error: %d\n", count);
-    //     return SDL_APP_FAILURE;
-    // }
-    // for (int i = 0; i < count; ++i) {
-    //     midi_message_unpacked_t msg =
-    //     midi_from_uint32(buffer[i].message).msg;
-
-    //    printf("message: data1: %u, data2: %u, padding: %u, status: %u\n",
-    //           msg.data1, msg.data2, msg._pad, msg.status.raw);
-
-    //    switch (msg.status.type) {
-    //    case 0x8:
-    //        printf("Note Off  ch=%u note=%u vel=%u\n", msg.status.channel + 1,
-    //               msg.data1, msg.data2);
-    //        break;
-    //    case 0x9:
-    //        printf("Note On   ch=%u note=%u vel=%u\n", msg.status.channel + 1,
-    //               msg.data1, msg.data2);
-    //        break;
-    //    case 0xB:
-    //        printf("Control    ch=%u ctrl=%u val=%u\n", msg.status.channel +
-    //        1,
-    //               msg.data1, msg.data2);
-    //        break;
-    //    case 0xC:
-    //        printf("ProgramCh  ch=%u prog=%u\n", msg.status.channel + 1,
-    //               msg.data1);
-    //        break;
-    //    default:
-    //        printf("Other msg  status=0x%02X ch=%u d1=%u d2=%u\n",
-    //               msg.status.type, msg.status.channel + 1, msg.data1,
-    //               msg.data2);
-    //    }
-    //}
+    uint32_t e = SDL_GetTicks();
+    dt = e - s;
+    LOGD("Ticks: frame start: %d, frame end: %d, dt: %d", s, e, dt);
     return SDL_APP_CONTINUE;
 }
 
@@ -176,4 +152,41 @@ void create_app_argparse(ArgParse *ap) {
  * printf("Opened input: %s\n", Pm_GetDeviceInfo(input_id)->name);
  *
  * app->stream = stream;
+ *
+ *  PmEvent buffer[32];
+ *  int count = Pm_Read(app->stream, buffer, 32);
+ *  if (count < 0) {
+ *      fprintf(stderr, "Pm_Read error: %d\n", count);
+ *      return SDL_APP_FAILURE;
+ *  }
+ *  for (int i = 0; i < count; ++i) {
+ *      midi_message_unpacked_t msg =
+ *      midi_from_uint32(buffer[i].message).msg;
+ *
+ *     printf("message: data1: %u, data2: %u, padding: %u, status: %u\n",
+ *            msg.data1, msg.data2, msg._pad, msg.status.raw);
+ *
+ *     switch (msg.status.type) {
+ *     case 0x8:
+ *         printf("Note Off  ch=%u note=%u vel=%u\n", msg.status.channel + 1,
+ *                msg.data1, msg.data2);
+ *         break;
+ *     case 0x9:
+ *         printf("Note On   ch=%u note=%u vel=%u\n", msg.status.channel + 1,
+ *                msg.data1, msg.data2);
+ *         break;
+ *     case 0xB:
+ *         printf("Control    ch=%u ctrl=%u val=%u\n", msg.status.channel +
+ *         1,
+ *                msg.data1, msg.data2);
+ *         break;
+ *     case 0xC:
+ *         printf("ProgramCh  ch=%u prog=%u\n", msg.status.channel + 1,
+ *                msg.data1);
+ *         break;
+ *     default:
+ *         printf("Other msg  status=0x%02X ch=%u d1=%u d2=%u\n",
+ *                msg.status.type, msg.status.channel + 1, msg.data1,
+ *                msg.data2);
+ *     }
  */

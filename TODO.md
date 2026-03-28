@@ -24,7 +24,7 @@
 
 ### 1.1 Core Abstraction Layer
 
-- [~] Define `ui_renderer_t` interface struct with function pointers:
+- [x] Define `ui_renderer_t` interface struct with function pointers:
   - `init(width, height, title)` → `bool`
   - `begin_frame()` / `end_frame()`
   - `draw_rect(x, y, w, h, color)`
@@ -34,14 +34,14 @@
   - `create_texture(pixels, w, h)` → `ui_texture_t`
   - `destroy_texture(ui_texture_t)`
   - `shutdown()`
-- [ ] Define `ui_color_t` as packed `uint32_t` (RGBA8) with helper macros `UI_RGBA(r,g,b,a)`, `UI_RGB(r,g,b)`
-- [ ] Define `ui_rect_t`, `ui_vec2_t`, `ui_font_t` as shared types across backends
-- [ ] Write `ui_renderer_registry`: runtime registration of named backends (e.g. `"sdl"`, `"opengl"`, `"vulkan"`)
-- [ ] CLI flag `--renderer <name>` wired through argparse → `App_t`
+- [x] Define `ui_color_t` as packed `uint32_t` (RGBA8) with helper macros `UI_RGBA(r,g,b,a)`, `UI_RGB(r,g,b)`
+- [x] Define `ui_rect_t`, `ui_vec2_t`, `ui_font_t` as shared types across backends
+- [x] Write `ui_renderer_registry`: runtime registration of named backends (e.g. `"sdl"`, `"opengl"`, `"vulkan"`)
+- [x] CLI flag `--renderer <name>` wired through argparse → `App_t`
 
 ### 1.2 SDL GPU / Software Backend (Primary)
 
-- [ ] Implement SDL3 GPU backend (`ui_backend_sdl.c`):
+- [x] Implement SDL3 GPU backend (`ui_backend_sdl.c`):
   - Use `SDL_GPUDevice` + `SDL_GPURenderPass` (SDL3's new GPU API)
   - Rectangle / line / text batching into a single draw call per frame
   - Fall back to `SDL_Renderer` (software) if GPU device creation fails

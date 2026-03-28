@@ -1,7 +1,7 @@
- // ---- color.vert ---- (vertex layout: vec2 pos, vec4 col — stride 24 B)
+// ---- color.vert ---- (vertex layout: vec2 pos, vec4 col — stride 24 B)
  
     #version 450
-    layout(push_constant) uniform PC { float inv_w; float inv_h; } pc;
+    layout(set=1, binding=0) uniform PC { float inv_w; float inv_h; } pc;
     layout(location = 0) in  vec2 a_pos;
     layout(location = 1) in  vec4 a_col;
     layout(location = 0) out vec4 v_col;

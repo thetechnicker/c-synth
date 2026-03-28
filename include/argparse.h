@@ -94,6 +94,8 @@ int argparse_add_flag(ArgParse *ap, const char *name, const char *description, b
         char *: argparse_add_value_s,                                                              \
         ValueArg: argparse_add_value_v)(ap, name, description, possitional, allow_short,           \
                                         short_override, x)
+// ValueDataType: argparse_add_value_n,
+// void *: argparse_add_value_v,
 
 int argparse_add_value_v(ArgParse *ap, const char *name, const char *description,
                          ValueArg default_v);
@@ -105,6 +107,9 @@ int argparse_add_value_c(ArgParse *ap, const char *name, const char *description
                          bool allow_short, const char short_override, char c);
 int argparse_add_value_s(ArgParse *ap, const char *name, const char *description, bool possitional,
                          bool allow_short, const char short_override, char *s);
+// int argparse_add_value_n(ArgParse *ap, const char *name, const char *description, bool
+// possitional,
+//                          bool allow_short, const char short_override, ValueDataType t);
 
 SDL_AppResult argparse_parse(int argc, char **argv, const ArgParse *ap, HashMap *result);
 

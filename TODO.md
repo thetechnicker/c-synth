@@ -45,8 +45,10 @@
   - Use `SDL_GPUDevice` + `SDL_GPURenderPass` (SDL3's new GPU API)
   - Rectangle / line / text batching into a single draw call per frame
   - Fall back to `SDL_Renderer` (software) if GPU device creation fails
-- [ ] Embed a minimal bitmap font (e.g. 8×8 or Terminus) compiled as a C array → `ui_font_builtin.h`
-- [ ] Glyph atlas upload as GPU texture on init
+- [x] Embed a minimal bitmap font (e.g. 8×8 or Terminus) compiled as a C array → `ui_font_builtin.h`
+- [x] Glyph atlas upload as GPU texture on init
+- [ ] Support for vector based fonts
+- [ ] font registry to manage fonts
 - [ ] Frame timing / vsync toggle (`--vsync on|off`)
 
 ### 1.3 OpenGL Backend

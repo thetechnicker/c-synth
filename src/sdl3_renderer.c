@@ -70,6 +70,7 @@
 
 #include "log.h"
 #include "ui.h"
+#include "ui_font_builtin.h"
 
 #include <SDL3/SDL.h>
 #include <math.h>
@@ -217,6 +218,9 @@ typedef struct {
     Uint32 cv_cnt[MAX_CMDS];
     Uint32 tv_off[MAX_CMDS];
     Uint32 tv_cnt[MAX_CMDS];
+
+    /* ---------- Build in defaults ---------- */
+    ui_texture_t builtin_font_tex;
 
 } ctx_t;
 
@@ -857,111 +861,6 @@ static void rdr_flush(void) {
 }
 
 /* =========================================================
- * Unified interface — init / begin / end / shutdown
- * ========================================================= */
-
-static bool sdl3_init(int width, int height, const char *title) {
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
-        LOGW("SDL_Init: %s", SDL_GetError());
-        return false;
-    }
-
-    ctx.width = width;
-    ctx.height = height;
-    ctx.win = SDL_CreateWindow(title, width, height, 0);
-    if (!ctx.win) {
-        LOGW("SDL_CreateWindow: %s", SDL_GetError());
-        return false;
-    }
-
-    if (gpu_setup()) {
-        ctx.path = PATH_GPU;
-        LOGD("using SDL_GPU path");
-        return true;
-    }
-
-    LOGW("SDL_GPU unavailable, falling back to SDL_Renderer");
-    ctx.rdr = SDL_CreateRenderer(ctx.win, NULL);
-    if (!ctx.rdr) {
-        LOGW("SDL_CreateRenderer: %s", SDL_GetError());
-        SDL_DestroyWindow(ctx.win);
-        ctx.win = NULL;
-        return false;
-    }
-    SDL_SetRenderDrawBlendMode(ctx.rdr, SDL_BLENDMODE_BLEND);
-    ctx.path = PATH_RDR;
-    return true;
-}
-
-static void sdl3_begin_frame(void) {
-    ctx.ncmds = 0;
-    ctx.spool_used = 0;
-
-    if (ctx.path == PATH_GPU) {
-        ctx.cmd = SDL_AcquireGPUCommandBuffer(ctx.gpu);
-        if (!ctx.cmd) {
-            LOGW("AcquireGPUCommandBuffer: %s", SDL_GetError());
-            return;
-        }
-        ctx.sc = NULL;
-        if (!SDL_WaitAndAcquireGPUSwapchainTexture(ctx.cmd, ctx.win, &ctx.sc, &ctx.sc_w,
-                                                   &ctx.sc_h)) {
-            LOGW("WaitAndAcquireGPUSwapchainTexture: %s", SDL_GetError());
-        }
-        if (ctx.sc) {
-            /* Keep logical size in sync with actual swapchain dimensions. */
-            ctx.width = (int)ctx.sc_w;
-            ctx.height = (int)ctx.sc_h;
-        }
-    } else {
-        SDL_SetRenderDrawColor(ctx.rdr, 0, 0, 0, 255);
-        SDL_RenderClear(ctx.rdr);
-    }
-}
-
-static void sdl3_end_frame(void) {
-    if (ctx.path == PATH_GPU) {
-        if (ctx.cmd) {
-            if (ctx.sc)
-                gpu_flush();
-            SDL_SubmitGPUCommandBuffer(ctx.cmd);
-            ctx.cmd = NULL;
-            ctx.sc = NULL;
-        }
-    } else {
-        rdr_flush();
-        SDL_RenderPresent(ctx.rdr);
-    }
-}
-
-static void sdl3_shutdown(void) {
-    if (ctx.path == PATH_GPU) {
-        gpu_teardown();
-    } else {
-        if (ctx.rdr) {
-            SDL_DestroyRenderer(ctx.rdr);
-            ctx.rdr = NULL;
-        }
-    }
-    if (ctx.win) {
-        SDL_DestroyWindow(ctx.win);
-        ctx.win = NULL;
-    }
-    SDL_Quit();
-}
-
-static void sdl3_on_resize(int w, int h) {
-    ctx.width = w;
-    ctx.height = h;
-    /*
-     * Both SDL_GPU and SDL_Renderer handle swapchain / viewport resize
-     * automatically; no explicit action is required here. This hook
-     * exists for consumers that need to update projection matrices or
-     * layout caches on resize.
-     */
-}
-
-/* =========================================================
  * Unified interface — draw calls (push to command list)
  * ========================================================= */
 
@@ -1132,6 +1031,117 @@ static void sdl3_destroy_texture(ui_texture_t t) {
         SDL_ReleaseGPUTexture(ctx.gpu, as_gpu(t));
     else
         SDL_DestroyTexture(as_rdr(t));
+}
+
+/* =========================================================
+ * Unified interface — init / begin / end / shutdown
+ * ========================================================= */
+
+static bool sdl3_init(int width, int height, const char *title) {
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        LOGW("SDL_Init: %s", SDL_GetError());
+        return false;
+    }
+
+    ctx.width = width;
+    ctx.height = height;
+    ctx.win = SDL_CreateWindow(title, width, height, 0);
+    if (!ctx.win) {
+        LOGW("SDL_CreateWindow: %s", SDL_GetError());
+        return false;
+    }
+
+    static uint8_t atlas_px[UI_FONT_BUILTIN_ATLAS_W * UI_FONT_BUILTIN_ATLAS_H];
+    ctx.builtin_font_tex =
+        sdl3_create_texture(atlas_px, UI_FONT_BUILTIN_ATLAS_W, UI_FONT_BUILTIN_ATLAS_H,
+                            1 // single channel
+        );
+
+    if (gpu_setup()) {
+        ctx.path = PATH_GPU;
+        LOGD("using SDL_GPU path");
+        return true;
+    }
+
+    LOGW("SDL_GPU unavailable, falling back to SDL_Renderer");
+    ctx.rdr = SDL_CreateRenderer(ctx.win, NULL);
+    if (!ctx.rdr) {
+        LOGW("SDL_CreateRenderer: %s", SDL_GetError());
+        SDL_DestroyWindow(ctx.win);
+        ctx.win = NULL;
+        return false;
+    }
+    SDL_SetRenderDrawBlendMode(ctx.rdr, SDL_BLENDMODE_BLEND);
+    ctx.path = PATH_RDR;
+    return true;
+}
+
+static void sdl3_begin_frame(void) {
+    ctx.ncmds = 0;
+    ctx.spool_used = 0;
+
+    if (ctx.path == PATH_GPU) {
+        ctx.cmd = SDL_AcquireGPUCommandBuffer(ctx.gpu);
+        if (!ctx.cmd) {
+            LOGW("AcquireGPUCommandBuffer: %s", SDL_GetError());
+            return;
+        }
+        ctx.sc = NULL;
+        if (!SDL_WaitAndAcquireGPUSwapchainTexture(ctx.cmd, ctx.win, &ctx.sc, &ctx.sc_w,
+                                                   &ctx.sc_h)) {
+            LOGW("WaitAndAcquireGPUSwapchainTexture: %s", SDL_GetError());
+        }
+        if (ctx.sc) {
+            /* Keep logical size in sync with actual swapchain dimensions. */
+            ctx.width = (int)ctx.sc_w;
+            ctx.height = (int)ctx.sc_h;
+        }
+    } else {
+        SDL_SetRenderDrawColor(ctx.rdr, 0, 0, 0, 255);
+        SDL_RenderClear(ctx.rdr);
+    }
+}
+
+static void sdl3_end_frame(void) {
+    if (ctx.path == PATH_GPU) {
+        if (ctx.cmd) {
+            if (ctx.sc)
+                gpu_flush();
+            SDL_SubmitGPUCommandBuffer(ctx.cmd);
+            ctx.cmd = NULL;
+            ctx.sc = NULL;
+        }
+    } else {
+        rdr_flush();
+        SDL_RenderPresent(ctx.rdr);
+    }
+}
+
+static void sdl3_shutdown(void) {
+    if (ctx.path == PATH_GPU) {
+        gpu_teardown();
+    } else {
+        if (ctx.rdr) {
+            SDL_DestroyRenderer(ctx.rdr);
+            ctx.rdr = NULL;
+        }
+    }
+    if (ctx.win) {
+        SDL_DestroyWindow(ctx.win);
+        ctx.win = NULL;
+    }
+    SDL_Quit();
+}
+
+static void sdl3_on_resize(int w, int h) {
+    ctx.width = w;
+    ctx.height = h;
+    /*
+     * Both SDL_GPU and SDL_Renderer handle swapchain / viewport resize
+     * automatically; no explicit action is required here. This hook
+     * exists for consumers that need to update projection matrices or
+     * layout caches on resize.
+     */
 }
 
 /* =========================================================

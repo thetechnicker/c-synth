@@ -156,6 +156,7 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
     if (app->renderer) {
         app->renderer->shutdown();
     }
+    free(app);
 
     log_shutdown();
 }

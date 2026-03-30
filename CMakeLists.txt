@@ -111,6 +111,11 @@ set(SDL_TARGET SDL3::SDL3)
 target_include_directories(synth PRIVATE ${CMAKE_SOURCE_DIR}/external/sdl)
 target_link_libraries(synth PRIVATE ${SDL_TARGET})
 
+set(ENABLE_CJSON_TEST OFF)
+set(ENABLE_CUSTOM_COMPILER_FLAGS OFF)
+add_subdirectory(${CMAKE_SOURCE_DIR}/external/cjson external/cjson_build)
+target_link_libraries(synth PRIVATE cjson)
+
 
 # Compiler flags per-config and per-compiler
 target_compile_options(synth PRIVATE

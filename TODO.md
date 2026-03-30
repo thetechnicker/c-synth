@@ -16,11 +16,11 @@
 | CMake (git metadata, version header, SDL3, PortMidi) | `CMakeLists.txt` | [x] |
 | Synth engine | `synth.c / synth.h` | [ ] |
 | UI framework | — | [ ] |
-| Render backends | — | [ ] |
+| Render backends | — | [~] |
 
 ---
 
-## Phase 1 — UI Framework (Current Goal)
+## Phase 1 — UI Framework
 
 ### 1.1 Core Abstraction Layer
 

@@ -80,7 +80,7 @@
   - [x] `ui_button(ctx, label)` → `bool` (clicked)
   - [x] `ui_label(ctx, text)`
   - [x] `ui_slider_f(ctx, label, value*, min, max)` → `bool` (changed)
-  - [ ] `ui_slider_i(ctx, label, value*, min, max)` → `bool`
+  - [~] `ui_slider_i(ctx, label, value*, min, max)` → `bool`
   - [x] `ui_knob(ctx, label, value*, min, max)` — rotary control, mouse drag
   - [x] `ui_toggle(ctx, label, value*)` — on/off LED button
   - [ ] `ui_dropdown(ctx, label, items[], count, selected*)` → `bool`

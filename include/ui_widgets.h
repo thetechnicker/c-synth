@@ -176,6 +176,8 @@ bool ui_toggle(ui_ctx_t *ctx, float x, float y, float w, float h, const char *la
  */
 bool ui_slider_f(ui_ctx_t *ctx, float x, float y, float w, float h, const char *label, float *value,
                  float min, float max, const char *fmt);
+bool ui_slider_i(ui_ctx_t *ctx, float x, float y, float w, float h, const char *label, int *value,
+                 int min, int max, const char *fmt);
 
 /*
  * ui_knob — rotary control.

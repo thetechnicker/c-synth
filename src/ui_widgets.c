@@ -33,9 +33,15 @@ static inline float text_h(const ui_ctx_t *ctx) { return (float)ctx->font.glyph_
 
 /* Clamp a float to [lo, hi]. */
 static inline float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
+/* Clamp a int to [lo, hi]. */
+static inline float clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 /* Linear map: v in [alo, ahi] → [blo, bhi]. */
 static inline float mapf(float v, float alo, float ahi, float blo, float bhi) {
+    return blo + (v - alo) / (ahi - alo) * (bhi - blo);
+}
+/* Linear map: v in [alo, ahi] → [blo, bhi]. */
+static inline int mapi(int v, int alo, int ahi, int blo, int bhi) {
     return blo + (v - alo) / (ahi - alo) * (bhi - blo);
 }
 
@@ -310,6 +316,96 @@ bool ui_toggle(ui_ctx_t *ctx, float x, float y, float w, float h, const char *la
 
 bool ui_slider_f(ui_ctx_t *ctx, float x, float y, float w, float h, const char *label, float *value,
                  float min, float max, const char *fmt) {
+    ui_rect_t cell;
+    if (ui_layout_cell(ctx, &cell)) {
+        x = cell.x;
+        y = cell.y;
+        w = cell.w;
+        h = cell.h;
+        ui_layout_next(ctx);
+    }
+
+    if (!fmt)
+        fmt = "%.3g";
+
+    ui_id_t id = UI_ID(label);
+
+    /* Reserve space on the right for the value label.
+     * Estimate worst-case: 8 chars * glyph_w + small margin. */
+    float val_label_w = 8.0f * (float)ctx->font.glyph_w + 4.f;
+    float bar_w = w - val_label_w;
+    if (bar_w < 10.f)
+        bar_w = 10.f;
+
+    bool hovered = pt_in_rect(ctx->mouse_x, ctx->mouse_y, x, y, bar_w, h);
+    bool changed = false;
+
+    if (hovered)
+        ctx->hot = id;
+    if (hovered && ctx->mouse_pressed)
+        ctx->active = id;
+
+    // LOGD("this widget %X is %s", id, ctx->hot == id ? "hot" : "cold");
+
+    if (ctx->hot == id && ctx->mouse_wy != 0.f) {
+        /* wheel Y: positive means scroll up (platform dependent) — treat positive as increase */
+        float delta = ctx->mouse_wy * wheel_sensitivity * (max - min);
+        float newv = clampf(*value + delta, min, max);
+        if (newv != *value) {
+            *value = newv;
+            changed = true;
+        }
+    }
+
+    if (ctx->active == id && ctx->mouse_down) {
+        /* map mouse X position directly to value */
+        float t = clampf((ctx->mouse_x - x) / bar_w, 0.f, 1.f);
+        float newv = min + t * (max - min);
+        if (newv != *value) {
+            *value = newv;
+            changed = true;
+        }
+    }
+
+    if (ctx->mouse_released && ctx->active == id)
+        ctx->active = 0;
+
+    /* draw track */
+    ctx->renderer->draw_rect(x, y, bar_w, h, UI_COL_SURFACE);
+
+    /* draw fill */
+    float fill = clampf(mapf(*value, min, max, 0.f, bar_w), 0.f, bar_w);
+    if (fill > 0.f)
+        ctx->renderer->draw_rect(x, y, fill, h,
+                                 (ctx->active == id) ? UI_COL_ACCENT : UI_COL_ACCENT_DIM);
+
+    /* thumb line */
+    ctx->renderer->draw_rect(x + fill - 1.f, y, 2.f, h, UI_COL_TEXT);
+
+    draw_border(ctx, x, y, bar_w, h, hovered ? UI_COL_SURFACE_HO : UI_COL_BORDER);
+
+    /* label above (small, dim) — only if it fits */
+    float th = text_h(ctx);
+    if (h >= th * 2.f + 2.f) {
+        ctx->renderer->draw_text(x + 2.f, y + 2.f, label, UI_COL_TEXT_DIM, ctx->font);
+    }
+
+    /* numeric value to the right */
+    char val_buf[32];
+    snprintf(val_buf, sizeof(val_buf), fmt, (double)*value);
+    float val_x = x + bar_w + 4.f;
+    float val_y = y + (h - th) * 0.5f;
+    ctx->renderer->draw_text(val_x, val_y, val_buf, UI_COL_TEXT, ctx->font);
+
+    return changed;
+}
+
+/* =========================================================
+ * ui_slider_f
+ * ========================================================= */
+
+bool ui_slider_i(ui_ctx_t *ctx, float x, float y, float w, float h, const char *label, int *value,
+                 int min, int max, const char *fmt) {
     ui_rect_t cell;
     if (ui_layout_cell(ctx, &cell)) {
         x = cell.x;

@@ -121,6 +121,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     LOGD("Frame dt_ms: %.1f cutoff: %.1f freq: %.1f osc_on:%d", dt_s * 1000.0f, cutoff, freq,
          osc_on);
 
+    // needs to run after ui_ctx_end_frame because other whise events wont be handled correctly.
     ui_ctx_begin_frame(&app->ui);
     return SDL_APP_CONTINUE;
 }

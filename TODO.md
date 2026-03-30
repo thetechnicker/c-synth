@@ -74,25 +74,25 @@
 
 ### 1.5 Widget System
 
-- [~] `ui_ctx_t` — retained state context (focus, hover, active widget ID)
-- [ ] Widget ID system: `ui_id_t` = `uint64_t` hash of string label + parent scope
-- [ ] Basic widgets:
-  - [ ] `ui_button(ctx, label)` → `bool` (clicked)
-  - [ ] `ui_label(ctx, text)`
-  - [ ] `ui_slider_f(ctx, label, value*, min, max)` → `bool` (changed)
+- [x] `ui_ctx_t` — retained state context (focus, hover, active widget ID)
+- [x] Widget ID system: `ui_id_t` = `uint64_t` hash of string label + parent scope
+- [~] Basic widgets:
+  - [x] `ui_button(ctx, label)` → `bool` (clicked)
+  - [x] `ui_label(ctx, text)`
+  - [x] `ui_slider_f(ctx, label, value*, min, max)` → `bool` (changed)
   - [ ] `ui_slider_i(ctx, label, value*, min, max)` → `bool`
-  - [ ] `ui_knob(ctx, label, value*, min, max)` — rotary control, mouse drag
-  - [ ] `ui_toggle(ctx, label, value*)` — on/off LED button
+  - [x] `ui_knob(ctx, label, value*, min, max)` — rotary control, mouse drag
+  - [x] `ui_toggle(ctx, label, value*)` — on/off LED button
   - [ ] `ui_dropdown(ctx, label, items[], count, selected*)` → `bool`
   - [ ] `ui_text_input(ctx, label, buf, buf_len)` → `bool`
   - [ ] `ui_separator(ctx)`
   - [ ] `ui_scope(ctx, label)` / `ui_scope_end(ctx)` — group / panel
-- [ ] Layout engine:
-  - [ ] `ui_layout_row(ctx, cols, widths[])` — fixed column row
-  - [ ] `ui_layout_push_id(ctx, id)` / `ui_layout_pop_id(ctx)` — scope nesting
+- [~] Layout engine:
+  - [~] `ui_layout_row(ctx, cols, widths[])` — fixed column row
+  - [~] `ui_layout_push_id(ctx, id)` / `ui_layout_pop_id(ctx)` — scope nesting
   - Horizontal and vertical flow modes
   - Auto-sizing with min/max constraints
-- [ ] Mouse input routing from `SDL_AppEvent` → `ui_ctx_t` (`mouse_x`, `mouse_y`, `mouse_buttons`, `scroll`)
+- [x] Mouse input routing from `SDL_AppEvent` → `ui_ctx_t` (`mouse_x`, `mouse_y`, `mouse_buttons`, `scroll`)
 - [ ] Keyboard input routing for text fields and keyboard shortcuts
 - [ ] `ui_waveform_display(ctx, samples, count)` — oscilloscope widget (line-draw via renderer)
 - [ ] `ui_spectrum_display(ctx, bins, count)` — FFT magnitude bars

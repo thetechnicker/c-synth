@@ -4,6 +4,7 @@
 #include "argparse.h"
 #include "hashmap.h"
 #include "ui.h"
+#include "ui_widgets.h"
 #include <SDL3/SDL.h>
 #include <errno.h>
 #include <portmidi.h>
@@ -22,6 +23,7 @@
 
 typedef struct App {
     const ui_renderer_t *renderer;
+    ui_ctx_t ui;
     PortMidiStream *stream;
     HashMap *config;
     bool buttonstates[SDL_SCANCODE_COUNT];

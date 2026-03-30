@@ -15,7 +15,7 @@
 | MIDI message types (pack/unpack, PortMidi bridge) | `midi.h` | [x] |
 | CMake (git metadata, version header, SDL3, PortMidi) | `CMakeLists.txt` | [x] |
 | Synth engine | `synth.c / synth.h` | [ ] |
-| UI framework | — | [ ] |
+| UI framework | — | [~] |
 | Render backends | — | [~] |
 
 ---
@@ -74,7 +74,7 @@
 
 ### 1.5 Widget System
 
-- [ ] `ui_ctx_t` — retained state context (focus, hover, active widget ID)
+- [~] `ui_ctx_t` — retained state context (focus, hover, active widget ID)
 - [ ] Widget ID system: `ui_id_t` = `uint64_t` hash of string label + parent scope
 - [ ] Basic widgets:
   - [ ] `ui_button(ctx, label)` → `bool` (clicked)

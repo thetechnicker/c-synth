@@ -24,6 +24,7 @@ typedef struct App {
     const ui_renderer_t *renderer;
     PortMidiStream *stream;
     HashMap *config;
+    bool buttonstates[SDL_SCANCODE_COUNT];
 } App_t;
 
 void create_app_argparse(ArgParse *ap);

@@ -20,7 +20,7 @@
 #define DEFAULT_WINDOW_HEIGHT 600
 
 #ifndef M_PI
- #define M_PI 3.14159265358979323846
+#define M_PI 3.14159265358979323846
 #endif
 
 uint32_t dt = 0;
@@ -80,42 +80,54 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     static float bounce = -0.65f;
     static float wobble = 0.0f; /* for face squash/tilt */
     static bool initialized = false;
+    static bool paused = false;
+    static uint8_t face_r = 220, face_g = 200, face_b = 80;
+    static float face_base_size = 140.0f;
 
     uint32_t now = SDL_GetTicks();
     if (!initialized) {
         last_ticks = now;
         initialized = true;
     }
-    float dt_s = (now - last_ticks) / 1000.0f;
+
+    /* use global dt if set (ms); otherwise compute from ticks */
+    float dt_s = 0.0f;
+    if (dt > 0) {
+        dt_s = dt / 1000.0f;
+    } else {
+        dt_s = (now - last_ticks) / 1000.0f;
+    }
     if (dt_s > 0.05f)
-        dt_s = 0.05f; /* clamp big frames */
+        dt_s = 0.05f; /* clamp large frames */
     last_ticks = now;
 
-    /* physics: horizontal wrap, vertical bounce on "floor" */
-    x += vx * dt_s;
-    vy += gravity * dt_s;
-    y += vy * dt_s;
+    if (!paused) {
+        /* physics: horizontal wrap, vertical bounce on "floor" */
+        x += vx * dt_s;
+        vy += gravity * dt_s;
+        y += vy * dt_s;
 
-    /* floor at 80% window height */
-    float floor_y = DEFAULT_WINDOW_HEIGHT * 0.80f;
-    if (y > floor_y) {
-        y = floor_y;
-        vy *= bounce;
-        /* create wobble proportional to impact */
-        wobble = fminf(1.0f, fabsf(vy) / 600.0f);
+        /* floor at 80% window height */
+        float floor_y = DEFAULT_WINDOW_HEIGHT * 0.80f;
+        if (y > floor_y) {
+            y = floor_y;
+            vy *= bounce;
+            /* create wobble proportional to impact */
+            wobble = fminf(1.0f, fabsf(vy) / 600.0f);
+        }
+
+        /* simple horizontal wrap */
+        if (x < -200)
+            x = DEFAULT_WINDOW_WIDTH + 200;
+        if (x > DEFAULT_WINDOW_WIDTH + 200)
+            x = -200;
+
+        /* gentler horizontal speed oscillation for funky hopping */
+        vx += sinf(now / 500.0f) * 8.0f * dt_s * 60.0f; /* scale to dt */
+
+        /* decay wobble */
+        wobble *= 0.9f;
     }
-
-    /* simple horizontal wrap */
-    if (x < 0)
-        x = DEFAULT_WINDOW_WIDTH;
-    if (x > DEFAULT_WINDOW_WIDTH)
-        x = 0;
-
-    /* gentler horizontal speed oscillation for funky hopping */
-    vx += sinf(now / 500.0f) * 8.0f;
-
-    /* decay wobble */
-    wobble *= 0.9f;
 
     app->renderer->begin_frame();
 
@@ -123,11 +135,11 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     app->renderer->draw_rect(0, 0, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, UI_RGB(20, 30, 48));
 
     /* ground strip */
+    float floor_y = DEFAULT_WINDOW_HEIGHT * 0.80f;
     app->renderer->draw_rect(0, floor_y + 40, DEFAULT_WINDOW_WIDTH,
                              DEFAULT_WINDOW_HEIGHT - (floor_y + 40), UI_RGB(18, 110, 50));
 
     /* compute face size and squash based on vertical speed / wobble */
-    float face_base_size = 140.0f;
     float squash = 1.0f - wobble * 0.35f - fminf(0.2f, fabsf(vy) / 400.0f);
     float stretch = 1.0f + (1.0f - squash) * 0.6f;
     float w = face_base_size * (1.0f + 0.08f * sinf(now / 120.0f));
@@ -137,17 +149,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     float fx = x - w * 0.5f;
     float fy = y - h * 0.5f;
 
-    /* wobbly face color that changes with time */
-    uint32_t face_r = (uint32_t)(220 + 20 * sinf(now / 300.0f));
-    uint32_t face_g = (uint32_t)(200 + 40 * cosf(now / 700.0f));
-    uint32_t face_b = 80;
-    ui_color_t face_col = UI_RGB(face_r & 0xFF, face_g & 0xFF, face_b);
+    ui_color_t face_col = UI_RGB(face_r, face_g, face_b);
 
-    /* draw face as a rounded-looking rectangle: central rect + soft edges by overlapping smaller
-     * rects */
+    /* draw face */
     app->renderer->draw_rect(fx, fy, w, h, face_col);
-
-    /* subtle highlight */
     app->renderer->draw_rect(fx + w * 0.08f, fy + h * 0.06f, w * 0.35f, h * 0.18f,
                              UI_RGBA(255, 255, 255, 24));
 
@@ -158,25 +163,23 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     float eye_xl = fx + w * 0.27f - eye_w * 0.5f;
     float eye_xr = fx + w * 0.73f - eye_w * 0.5f;
 
-    /* blink effect: use sine to occasionally close */
     float blink = (sinf(now / 350.0f) > 0.95f) ? 0.08f : 1.0f;
     app->renderer->draw_rect(eye_xl, eye_y, eye_w, eye_h * blink, UI_RGB(10, 10, 10));
     app->renderer->draw_rect(eye_xr, eye_y, eye_w, eye_h * blink, UI_RGB(10, 10, 10));
 
-    /* pupils that track horizontal motion a little */
     float px_offset = fmaxf(-eye_w * 0.12f, fminf(eye_w * 0.12f, vx / 400.0f * eye_w));
     app->renderer->draw_rect(eye_xl + eye_w * 0.25f + px_offset, eye_y + eye_h * 0.25f,
                              eye_w * 0.25f, eye_h * 0.5f * blink, UI_RGB(255, 255, 255));
     app->renderer->draw_rect(eye_xr + eye_w * 0.25f + px_offset, eye_y + eye_h * 0.25f,
                              eye_w * 0.25f, eye_h * 0.5f * blink, UI_RGB(255, 255, 255));
 
-    /* silly nose */
+    /* nose */
     float nose_w = w * 0.08f;
     float nose_h = h * 0.06f;
     app->renderer->draw_rect(fx + w * 0.5f - nose_w * 0.5f, fy + h * 0.47f, nose_w, nose_h,
                              UI_RGB(255, 120, 60));
 
-    /* mouth as an arc made of short lines — more amplitude when in the air */
+    /* mouth */
     int segments = 18;
     float mouth_r = w * 0.32f;
     float mouth_cx = fx + w * 0.5f;
@@ -199,49 +202,46 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         app->renderer->draw_line(x0, y0, x1, y1, mouth_col, 4.0f);
     }
 
-    /* silly eyebrow wiggle (lines) */
+    /* eyebrows */
     float brow_y = fy + h * 0.18f - (1.0f - squash) * 6.0f;
     app->renderer->draw_line(eye_xl - 4, brow_y, eye_xl + eye_w + 4,
                              brow_y - 6.0f * sinf(now / 180.0f), UI_RGB(10, 10, 10), 3.0f);
     app->renderer->draw_line(eye_xr - 4, brow_y - 6.0f * sinf(now / 160.0f + 1.2f),
                              eye_xr + eye_w + 4, brow_y, UI_RGB(10, 10, 10), 3.0f);
 
-    /* a small shadow under the face */
+    /* shadow */
     float sh_w = w * 1.05f;
     float sh_h = h * 0.12f * (1.0f - wobble * 0.6f);
     app->renderer->draw_rect(fx + (w - sh_w) * 0.5f, floor_y + 8.0f, sh_w, sh_h,
                              UI_RGBA(10, 10, 10, 96));
 
-    /* a funny little caption made from blocks (since font may be unavailable) */
+    /* caption using renderer text API */
     const char *caption = "BOING!";
-    /* draw caption as block letters using simple rectangles */
-    float cap_w = 220.0f;
-    float cap_h = 36.0f;
-    float cap_x = DEFAULT_WINDOW_WIDTH * 0.5f - cap_w * 0.5f;
-    float cap_y = 18.0f + 6.0f * sinf(now / 400.0f);
-    app->renderer->draw_rect(cap_x - 8, cap_y - 8, cap_w + 16, cap_h + 16, UI_RGBA(0, 0, 0, 64));
-    /* each letter block */
-    int n = 6;
-    for (int i = 0; i < n; ++i) {
-        float bx = cap_x + i * (cap_w / n);
-        float by = cap_y + ((i + now / 120) % 2 ? -3.0f : 3.0f);
-        /* color cycling */
-        uint8_t r = (uint8_t)(180 + 40 * sinf(now / 200.0f + i));
-        uint8_t g = (uint8_t)(80 + 80 * cosf(now / 300.0f + i));
-        uint8_t b = (uint8_t)(200 - 50 * sinf(now / 250.0f + i));
-        app->renderer->draw_rect(bx, by, cap_w / n - 6, cap_h, UI_RGB(r, g, b));
-    }
+    float caption_x = DEFAULT_WINDOW_WIDTH * 0.5f - 60.0f;
+    float caption_y = 18.0f + 6.0f * sinf(now / 400.0f);
+    app->renderer->draw_text(caption_x, caption_y, caption, UI_RGB(255, 230, 100),
+                             app->renderer->get_buildin_font());
 
+    /* draw small HUD text using renderer text API (left bottom) */
+    char info[128];
+    snprintf(info, sizeof(info), "dt:%ums vx:%.0f g:%.0f size:%.0f %s",
+             (unsigned)(dt > 0 ? dt : (uint32_t)(dt_s * 1000.0f)), vx, gravity, face_base_size,
+             paused ? "PAUSED" : "RUN");
+    float info_x = 12.0f;
+    float info_y = DEFAULT_WINDOW_HEIGHT - 36.0f;
+    /* background behind HUD (optional) */
+    app->renderer->draw_rect(info_x - 6.0f, info_y - 6.0f, 420.0f, 32.0f, UI_RGBA(0, 0, 0, 120));
+    app->renderer->draw_text(info_x, info_y, info, UI_RGB(220, 220, 220),
+                             app->renderer->get_buildin_font());
     app->renderer->end_frame();
 
-    LOGD("Frame ticks: %u dt_ms: %.1f vx: %.1f vy: %.1f wobble: %.2f", now, dt_s * 1000.0f, vx, vy,
-         wobble);
+    LOGD("Frame dt_ms: %.1f vx: %.1f vy: %.1f wobble: %.2f paused:%d", dt_s * 1000.0f, vx, vy,
+         wobble, paused);
     return SDL_APP_CONTINUE;
 }
 
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
-    (void)appstate;
-
+    App_t *app = (App_t *)appstate;
     char buf[256];
     SDL_GetEventDescription(event, buf, sizeof(buf));
     LOGD("Received event: %s", buf);
@@ -249,6 +249,16 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
     switch (event->type) {
     case SDL_EVENT_QUIT:
         return SDL_APP_SUCCESS;
+
+    case SDL_EVENT_KEY_DOWN: {
+        app->buttonstates[event->key.scancode] = true;
+        break;
+    }
+    case SDL_EVENT_KEY_UP: {
+        app->buttonstates[event->key.scancode] = false;
+        break;
+    }
+
     default:
         break;
     }

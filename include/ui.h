@@ -25,6 +25,7 @@ typedef struct ui_texture_t {
 typedef struct ui_font_t {
     uint64_t id;
     int glyph_w, glyph_h;
+    int atlas_cols, atlas_rows;
 } ui_font_t;
 
 /* Renderer interface */
@@ -45,30 +46,32 @@ typedef struct ui_renderer_t {
     ui_texture_t (*create_texture)(const void *pixels, int w, int h, int channels);
     void (*destroy_texture)(ui_texture_t);
 
+    /* build in font */
+    ui_font_t (*get_buildin_font)(void);
+
     /* optional: framebuffer/resize */
     void (*on_resize)(int width, int height);
 } ui_renderer_t;
 
-
 #if defined(_MSC_VER)
-  /* MSVC: place a pointer to the function in .CRT$XCU */
-  #pragma section(".CRT$XCU", read)
-  typedef void (__cdecl *ctor_fn_t)(void);
+/* MSVC: place a pointer to the function in .CRT$XCU */
+#pragma section(".CRT$XCU", read)
+typedef void(__cdecl *ctor_fn_t)(void);
 
-  /* Helper to avoid name-pasting issues in C++ */
-  #ifdef __cplusplus
-    #define CRT_CTOR_NAME(fn) fn##_msvc_ctor
-  #else
-    #define CRT_CTOR_NAME(fn) fn##_msvc_ctor
-  #endif
+/* Helper to avoid name-pasting issues in C++ */
+#ifdef __cplusplus
+#define CRT_CTOR_NAME(fn) fn##_msvc_ctor
+#else
+#define CRT_CTOR_NAME(fn) fn##_msvc_ctor
+#endif
 
-  #define REGISTER_CONSTRUCTOR(fn)                                      \
-    extern void fn(void);                                               \
+#define REGISTER_CONSTRUCTOR(fn)                                                                   \
+    extern void fn(void);                                                                          \
     __declspec(allocate(".CRT$XCU")) static ctor_fn_t CRT_CTOR_NAME(fn) = fn
 
 #else /* GCC / Clang and compatibles */
-  #define REGISTER_CONSTRUCTOR(fn) \
-    static void fn(void) __attribute__((constructor)); \
+#define REGISTER_CONSTRUCTOR(fn)                                                                   \
+    static void fn(void) __attribute__((constructor));                                             \
     static void fn(void)
 #endif
 

@@ -79,6 +79,55 @@
 #include <string.h>
 
 /* =========================================================
+ * Function signatures
+ * ========================================================= */
+
+static void unpack(ui_color_t c, float *r, float *gn, float *b, float *a);
+static inline Uint8 uf(float v);
+static inline ui_texture_t pack_gpu(SDL_GPUTexture *t);
+static inline ui_texture_t pack_rdr(SDL_Texture *t);
+static inline SDL_GPUTexture *as_gpu(ui_texture_t t);
+static inline SDL_Texture *as_rdr(ui_texture_t t);
+
+static SDL_GPUShader *load_spv(const char *path, SDL_GPUShaderStage stage, Uint32 n_uniform,
+                               Uint32 n_sampler);
+static SDL_GPUColorTargetDescription make_blend_target(SDL_GPUTextureFormat fmt);
+static SDL_GPUGraphicsPipeline *make_color_pipe(SDL_GPUTextureFormat fmt);
+static SDL_GPUGraphicsPipeline *make_tex_pipe(SDL_GPUTextureFormat fmt);
+
+static bool gpu_setup(void);
+static void gpu_teardown(void);
+
+static void push_cv_quad(float x, float y, float w, float h, ui_color_t c);
+static void push_cv_line(float x1, float y1, float x2, float y2, float thick, ui_color_t c);
+static void push_tv_quad(float x, float y, float w, float h, float u0, float v0, float u1, float v1,
+                         ui_color_t tint);
+static void push_text_verts(float x, float y, const char *text, ui_color_t col, ui_font_t font);
+
+static void gpu_flush(void);
+static void rdr_thick_line(float x1, float y1, float x2, float y2, float thick, ui_color_t c);
+static void rdr_flush(void);
+
+static void sdl3_draw_rect(float x, float y, float w, float h, ui_color_t color);
+static void sdl3_draw_line(float x1, float y1, float x2, float y2, ui_color_t color,
+                           float thickness);
+static void sdl3_draw_text(float x, float y, const char *text, ui_color_t color, ui_font_t font);
+static void sdl3_draw_image(float x, float y, float w, float h, ui_texture_t texture,
+                            ui_color_t tint);
+
+static Uint8 *to_rgba(const void *pixels, int w, int h, int channels);
+static ui_texture_t sdl3_create_texture(const void *pixels, int w, int h, int channels);
+static void sdl3_destroy_texture(ui_texture_t t);
+
+static bool sdl3_init(int width, int height, const char *title);
+static void sdl3_begin_frame(void);
+static void sdl3_end_frame(void);
+static void sdl3_shutdown(void);
+static void sdl3_on_resize(int w, int h);
+
+ui_font_t ui_font_builtin(void);
+
+/* =========================================================
  * Compile-time tunables
  * ========================================================= */
 
@@ -582,26 +631,29 @@ static void push_tv_quad(float x, float y, float w, float h, float u0, float v0,
  * each cell is font.glyph_w × font.glyph_h pixels.
  * Atlas pixel dimensions: (GLYPH_COLS * gw) × (ceil(range/GLYPH_COLS) * gh).
  */
+
 static void push_text_verts(float x, float y, const char *text, ui_color_t col, ui_font_t font) {
     const int gw = font.glyph_w;
     const int gh = font.glyph_h;
-    const int range = GLYPH_LAST - GLYPH_FIRST + 1;
-    const int rows = (range + GLYPH_COLS - 1) / GLYPH_COLS;
-    const float faw = (float)(GLYPH_COLS * gw);
-    const float fah = (float)(rows * gh);
+    const int cols = font.atlas_cols;
+    const int rows = font.atlas_rows;
+    const float inv_cols = 1.0f / (float)cols;
+    const float inv_rows = 1.0f / (float)rows;
+    const int max_slot = cols * rows;
     float cx = x;
 
     for (const char *p = text; *p; ++p) {
-        int ch = (unsigned char)*p;
-        if (ch < GLYPH_FIRST || ch > GLYPH_LAST) {
+        int slot = (unsigned char)*p - 0x20;
+        if (slot < 0 || slot >= max_slot) {
             cx += gw;
             continue;
         }
-        int idx = ch - GLYPH_FIRST;
-        float u0 = (float)((idx % GLYPH_COLS) * gw) / faw;
-        float v0 = (float)((idx / GLYPH_COLS) * gh) / fah;
-        float u1 = (float)((idx % GLYPH_COLS) * gw + gw) / faw;
-        float v1 = (float)((idx / GLYPH_COLS) * gh + gh) / fah;
+
+        float u0 = (float)(slot % cols) * inv_cols;
+        float v0 = (float)(slot / cols) * inv_rows;
+        float u1 = u0 + inv_cols;
+        float v1 = v0 + inv_rows;
+
         push_tv_quad(cx, y, (float)gw, (float)gh, u0, v0, u1, v1, col);
         cx += gw;
     }
@@ -1051,15 +1103,16 @@ static bool sdl3_init(int width, int height, const char *title) {
         return false;
     }
 
-    static uint8_t atlas_px[UI_FONT_BUILTIN_ATLAS_W * UI_FONT_BUILTIN_ATLAS_H];
-    ctx.builtin_font_tex =
-        sdl3_create_texture(atlas_px, UI_FONT_BUILTIN_ATLAS_W, UI_FONT_BUILTIN_ATLAS_H,
-                            1 // single channel
-        );
-
     if (gpu_setup()) {
-        ctx.path = PATH_GPU;
         LOGD("using SDL_GPU path");
+        ctx.path = PATH_GPU;
+
+        static uint8_t atlas_px[UI_FONT_BUILTIN_ATLAS_W * UI_FONT_BUILTIN_ATLAS_H];
+        ui_font_builtin_render_atlas(atlas_px);
+
+        ctx.builtin_font_tex =
+            sdl3_create_texture(atlas_px, UI_FONT_BUILTIN_ATLAS_W, UI_FONT_BUILTIN_ATLAS_H, 1);
+
         return true;
     }
 
@@ -1073,6 +1126,12 @@ static bool sdl3_init(int width, int height, const char *title) {
     }
     SDL_SetRenderDrawBlendMode(ctx.rdr, SDL_BLENDMODE_BLEND);
     ctx.path = PATH_RDR;
+    {
+        static uint8_t atlas_px[UI_FONT_BUILTIN_ATLAS_W * UI_FONT_BUILTIN_ATLAS_H];
+        ui_font_builtin_render_atlas(atlas_px);
+        ctx.builtin_font_tex =
+            sdl3_create_texture(atlas_px, UI_FONT_BUILTIN_ATLAS_W, UI_FONT_BUILTIN_ATLAS_H, 1);
+    }
     return true;
 }
 
@@ -1144,6 +1203,17 @@ static void sdl3_on_resize(int w, int h) {
      */
 }
 
+// expose to callers:
+ui_font_t ui_font_builtin(void) {
+    return (ui_font_t){
+        .id = ctx.builtin_font_tex.id,
+        .glyph_w = UI_FONT_BUILTIN_GLYPH_W,
+        .glyph_h = UI_FONT_BUILTIN_GLYPH_H,
+        .atlas_cols = UI_FONT_BUILTIN_ATLAS_COLS,
+        .atlas_rows = UI_FONT_BUILTIN_ATLAS_H / UI_FONT_BUILTIN_GLYPH_H,
+    };
+}
+
 /* =========================================================
  * Renderer descriptor
  * ========================================================= */
@@ -1160,6 +1230,7 @@ static const ui_renderer_t sdl3_renderer = {
     .draw_image = sdl3_draw_image,
     .create_texture = sdl3_create_texture,
     .destroy_texture = sdl3_destroy_texture,
+    .get_buildin_font = ui_font_builtin,
     .on_resize = sdl3_on_resize,
 };
 

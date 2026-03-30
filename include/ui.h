@@ -67,7 +67,8 @@ typedef void(__cdecl *ctor_fn_t)(void);
 
 #define REGISTER_CONSTRUCTOR(fn)                                                                   \
     extern void fn(void);                                                                          \
-    __declspec(allocate(".CRT$XCU")) static ctor_fn_t CRT_CTOR_NAME(fn) = fn
+    __declspec(allocate(".CRT$XCU")) static ctor_fn_t CRT_CTOR_NAME(fn) = fn;                      \
+    void fn()
 
 #else /* GCC / Clang and compatibles */
 #define REGISTER_CONSTRUCTOR(fn)                                                                   \

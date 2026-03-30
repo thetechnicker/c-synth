@@ -45,6 +45,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     }
 
     App_t *app = malloc(sizeof(App_t));
+    memset(app, 0, sizeof(App_t));
     if (!app) {
         LOGE("Cannot create app: %s", strerror(ENOMEM));
     }
@@ -53,15 +54,18 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     char title[MAX_TITLE_LEN];
     sprintf(title, "Version: %s (%s)%s, built: %s", PROJECT_GIT_DESCRIBE, PROJECT_GIT_COMMIT,
             PROJECT_GIT_DIRTY ? "-dirty" : "", PROJECT_BUILD_TIMESTAMP);
+    ArgParseResult **arg_renderer = hashmap_get(app->config, "renderer");
+    char *renderer = (*arg_renderer)->s;
+    if (!renderer || strcmp(renderer, "default") == 0) {
+        app->renderer = ui_get_default_renderer();
+    } else {
+        app->renderer = ui_get_renderer(renderer);
+    }
+    if (!app->renderer) {
+        LOGW("fallback to default renderer");
+        app->renderer = ui_get_default_renderer();
+    }
 
-    // const char *renderer = hashmap_get(app->config, "renderer");
-    // const char *renderer = hashmap_get(app->config, "renderer");
-    // if (!renderer || strcmp(renderer, "default")) {
-    //     app->renderer = ui_get_default_renderer();
-    // } else {
-    //     app->renderer = ui_get_renderer(renderer);
-    // }
-    app->renderer = ui_get_default_renderer();
     app->renderer->init(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, title);
     ui_ctx_init(&app->ui, app->renderer);
 

@@ -6,10 +6,12 @@
  */
 
 #include "ui_widgets.h"
+#include "log.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
 
+static float wheel_sensitivity = .02f; /* fraction of range per wheel unit */
 /* =========================================================
  * Internal helpers
  * ========================================================= */
@@ -64,6 +66,7 @@ void ui_ctx_feed_event(ui_ctx_t *ctx, const SDL_Event *event) {
 
     case SDL_EVENT_MOUSE_MOTION:
         ctx->mouse_dy += event->motion.yrel; /* accumulate for knobs */
+        ctx->mouse_dx += event->motion.xrel;
         ctx->mouse_x = event->motion.x;
         ctx->mouse_y = event->motion.y;
         break;
@@ -85,10 +88,55 @@ void ui_ctx_feed_event(ui_ctx_t *ctx, const SDL_Event *event) {
             ctx->mouse_y = event->button.y;
         }
         break;
-    case SDL_EVENT_MOUSE_WHEEL:
-        ctx->mouse_wx += event->wheel.mouse_x; /* accumulate for knobs */
-        ctx->mouse_wy += event->wheel.mouse_y; /* accumulate for knobs */
+
+    case SDL_EVENT_FINGER_DOWN: {
+        /* Map normalized finger coords to window pixels */
+        SDL_Window *win = SDL_GetWindowFromID(event->tfinger.windowID);
+        int w = 0, h = 0;
+        if (win)
+            SDL_GetWindowSize(win, &w, &h);
+        ctx->mouse_x = (w > 0) ? event->tfinger.x * w : event->tfinger.x;
+        ctx->mouse_y = (h > 0) ? event->tfinger.y * h : event->tfinger.y;
+        ctx->mouse_down = true;
+        ctx->mouse_pressed = true;
         break;
+    }
+
+    case SDL_EVENT_FINGER_MOTION: {
+        SDL_Window *win = SDL_GetWindowFromID(event->tfinger.windowID);
+        int w = 0, h = 0;
+        if (win)
+            SDL_GetWindowSize(win, &w, &h);
+        /* dx/dy are normalized; convert to pixels if we have size */
+        float dx = (w > 0) ? event->tfinger.dx * w : event->tfinger.dx;
+        float dy = (h > 0) ? event->tfinger.dy * h : event->tfinger.dy;
+        ctx->mouse_dx += dx;
+        ctx->mouse_dy += dy; /* accumulate for knobs */
+        ctx->mouse_x = (w > 0) ? event->tfinger.x * w : event->tfinger.x;
+        ctx->mouse_y = (h > 0) ? event->tfinger.y * h : event->tfinger.y;
+        /* keep mouse_down true while finger moves */
+        break;
+    }
+
+    case SDL_EVENT_FINGER_UP: {
+        SDL_Window *win = SDL_GetWindowFromID(event->tfinger.windowID);
+        int w = 0, h = 0;
+        if (win)
+            SDL_GetWindowSize(win, &w, &h);
+        ctx->mouse_x = (w > 0) ? event->tfinger.x * w : event->tfinger.x;
+        ctx->mouse_y = (h > 0) ? event->tfinger.y * h : event->tfinger.y;
+        ctx->mouse_down = false;
+        ctx->mouse_released = true;
+        break;
+    }
+
+    case SDL_EVENT_MOUSE_WHEEL:
+        // LOGE("YAY, event: %f, %f", event->wheel.x, event->wheel.y);
+        ctx->mouse_wx += event->wheel.x;
+        ctx->mouse_wy += event->wheel.y;
+        LOGE("YAY, accumulated: %f, %f", ctx->mouse_wx, ctx->mouse_wy);
+        break;
+
     default:
         break;
     }
@@ -101,6 +149,9 @@ void ui_ctx_begin_frame(ui_ctx_t *ctx) {
     ctx->mouse_pressed = false;
     ctx->mouse_released = false;
     ctx->mouse_dy = 0.f;
+    ctx->mouse_dx = 0.f;
+    ctx->mouse_wx = 0.f;
+    ctx->mouse_wy = 0.f;
 }
 
 void ui_ctx_end_frame(ui_ctx_t *ctx) {
@@ -288,6 +339,18 @@ bool ui_slider_f(ui_ctx_t *ctx, float x, float y, float w, float h, const char *
     if (hovered && ctx->mouse_pressed)
         ctx->active = id;
 
+    // LOGD("this widget %X is %s", id, ctx->hot == id ? "hot" : "cold");
+
+    if (ctx->hot == id && ctx->mouse_wy != 0.f) {
+        /* wheel Y: positive means scroll up (platform dependent) — treat positive as increase */
+        float delta = ctx->mouse_wy * wheel_sensitivity * (max - min);
+        float newv = clampf(*value + delta, min, max);
+        if (newv != *value) {
+            *value = newv;
+            changed = true;
+        }
+    }
+
     if (ctx->active == id && ctx->mouse_down) {
         /* map mouse X position directly to value */
         float t = clampf((ctx->mouse_x - x) / bar_w, 0.f, 1.f);
@@ -388,6 +451,15 @@ bool ui_knob(ui_ctx_t *ctx, float x, float y, float diameter, const char *label,
         ctx->hot = id;
     if (hovered && ctx->mouse_pressed)
         ctx->active = id;
+
+    if (ctx->hot == id && ctx->mouse_wy != 0.f) {
+        float delta = ctx->mouse_wy * wheel_sensitivity * (max - min);
+        float newv = clampf(*value + delta, min, max);
+        if (newv != *value) {
+            *value = newv;
+            changed = true;
+        }
+    }
 
     if (ctx->active == id && ctx->mouse_down && ctx->mouse_dy != 0.f) {
         /* Drag upward (negative yrel) → increase value */

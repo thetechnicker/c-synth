@@ -24,7 +24,11 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-uint32_t dt = 0;
+uint64_t dt = 0;
+
+float freq = 440.f;
+float cutoff = 1000.f; /* initialize inside [min,max] to avoid constant clamping */
+bool osc_on = false;
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     // SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO); // idk if this line is needed, no difference found
@@ -77,11 +81,10 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
 
 SDL_AppResult SDL_AppIterate(void *appstate) {
     App_t *app = (App_t *)appstate;
-    (void)app;
-    static uint32_t last_ticks = 0;
+    static uint64_t last_ticks = 0;
     static bool initialized = false;
 
-    uint32_t now = SDL_GetTicks();
+    uint64_t now = SDL_GetTicks();
     if (!initialized) {
         last_ticks = now;
         initialized = true;
@@ -99,25 +102,26 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     last_ticks = now;
 
     app->renderer->begin_frame();
-    ui_ctx_begin_frame(&app->ui);
-
-    static float freq = 440.f;
-    static float cutoff = 10.f;
-    static bool osc_on = false;
 
     ui_layout_begin_row(&app->ui, 20.f, 20.f, 160.f, 32.f, 8.f);
-    ui_toggle(&app->ui, 0, 0, 0, 0, "OSC", &osc_on);
-    ui_slider_f(&app->ui, 0, 0, 0, 0, "Freq", &freq, 20.f, 20000.f, "%.0f Hz");
+    if (ui_toggle(&app->ui, 0, 0, 0, 0, "OSC", &osc_on))
+        LOGW("OSC changed");
+    if (ui_slider_f(&app->ui, 0, 0, 0, 0, "Freq", &freq, 20.f, 20000.f, "%.0f Hz"))
+        LOGW("slider changed");
     ui_layout_end_row(&app->ui);
 
-    ui_knob(&app->ui, 20.f, 70.f, 64.f, "Cutoff", &cutoff, 20.f, 20000.f, 200.f, "%.0f");
+    if (ui_knob(&app->ui, 20.f, 70.f, 64.f, "Cutoff", &cutoff, 20.f, 20000.f, 200.f, "%.0f"))
+        LOGW("slider changed");
 
-    // End frame (renderer should draw in ui_ctx_end_frame)
+    // LOGD("ui ctx mouse wheel: %0.1f %0.1f", app->ui.mouse_wx, app->ui.mouse_wy);
+    //  End frame (renderer should draw in ui_ctx_end_frame)
     ui_ctx_end_frame(&app->ui);
     app->renderer->end_frame();
 
-    LOGD("Frame dt_ms: %.1f volume: %.1f freq: %.1f paused:%d", dt_s * 1000.0f, cutoff, freq,
+    LOGD("Frame dt_ms: %.1f cutoff: %.1f freq: %.1f osc_on:%d", dt_s * 1000.0f, cutoff, freq,
          osc_on);
+
+    ui_ctx_begin_frame(&app->ui);
     return SDL_APP_CONTINUE;
 }
 
@@ -126,7 +130,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
     ui_ctx_feed_event(&app->ui, event);
     char buf[256];
     SDL_GetEventDescription(event, buf, sizeof(buf));
-    LOGD("Received event: %s", buf);
+    LOGI("Received event: %s", buf);
     switch (event->type) {
     case SDL_EVENT_QUIT:
         return SDL_APP_SUCCESS;

@@ -145,6 +145,11 @@ typedef struct {
     bool active;
 } ui_layout_t;
 
+typedef struct {
+    float x, y;
+    float w, h;
+} ui_area_t;
+
 /* =========================================================
  * Context
  * ========================================================= */
@@ -241,15 +246,15 @@ void ui_layout_begin_column(ui_ctx_t *ctx, float x, float y, float item_w, float
  * widths[col_count] gives the width of each column; item_h is the row height.
  * Successive widgets consume widths[0], widths[1], … in order.
  */
-void ui_layout_row(ui_ctx_t *ctx, float x, float y, int col_count, const float *widths,
-                   float item_h);
+ui_area_t ui_layout_row(ui_ctx_t *ctx, float x, float y, int col_count, const float *widths,
+                        float item_h, float pad);
 
 /* Advance the cursor by one cell (called internally by each widget). */
 void ui_layout_next(ui_ctx_t *ctx);
 
 /* End any active layout. */
-void ui_layout_end_row(ui_ctx_t *ctx);
-void ui_layout_end_column(ui_ctx_t *ctx); /* alias for clarity */
+ui_area_t ui_layout_end_row(ui_ctx_t *ctx);
+ui_area_t ui_layout_end_column(ui_ctx_t *ctx); /* alias for clarity */
 
 /*
  * Fill r with the rect for the next layout cell.
@@ -301,7 +306,7 @@ void ui_separator(ui_ctx_t *ctx, float x, float y, float len, float thickness, b
  * Widgets drawn between ui_scope / ui_scope_end are NOT automatically
  * clipped to the panel; this is purely a visual grouping aid.
  */
-void ui_scope(ui_ctx_t *ctx, float x, float y, float w, float h, const char *label);
+ui_area_t ui_scope(ui_ctx_t *ctx, float x, float y, float w, float h, const char *label);
 void ui_scope_end(ui_ctx_t *ctx);
 
 /*

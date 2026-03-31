@@ -310,20 +310,26 @@ void ui_layout_begin_column(ui_ctx_t *ctx, float x, float y, float item_w, float
     ctx->layout.active = true;
 }
 
-void ui_layout_row(ui_ctx_t *ctx, float x, float y, int col_count, const float *widths,
-                   float item_h) {
+ui_area_t ui_layout_row(ui_ctx_t *ctx, float x, float y, int col_count, const float *widths,
+                        float item_h, float pad) {
     memset(&ctx->layout, 0, sizeof(ctx->layout));
     ctx->layout.x = x;
     ctx->layout.y = y;
     ctx->layout.item_h = item_h;
+    ctx->layout.padding = pad;
     ctx->layout.cursor_x = x;
     ctx->layout.cursor_y = y;
     ctx->layout.dir = UI_LAYOUT_HORIZONTAL;
     ctx->layout.active = true;
     int n = col_count < UI_LAYOUT_COL_MAX ? col_count : UI_LAYOUT_COL_MAX;
     ctx->layout.col_count = n;
-    for (int i = 0; i < n; ++i)
+    float tw = 0;
+    for (int i = 0; i < n; ++i) {
+        tw += widths[i];
         ctx->layout.col_widths[i] = widths[i];
+    }
+    tw += ctx->layout.padding * (n - 1);
+    return (ui_area_t){.x = x, .y = y, .w = tw, .h = item_h};
 }
 
 void ui_layout_next(ui_ctx_t *ctx) {
@@ -342,8 +348,22 @@ void ui_layout_next(ui_ctx_t *ctx) {
     }
 }
 
-void ui_layout_end_row(ui_ctx_t *ctx) { ctx->layout.active = false; }
-void ui_layout_end_column(ui_ctx_t *ctx) { ctx->layout.active = false; }
+ui_area_t ui_layout_end_row(ui_ctx_t *ctx) {
+    ctx->layout.active = false;
+    float x = ctx->layout.x;
+    float y = ctx->layout.y;
+    float w = ctx->layout.cursor_x + ctx->layout.padding;
+    float h = ctx->layout.item_h;
+    return (ui_area_t){.x = x, .y = y, .w = w, .h = h};
+}
+ui_area_t ui_layout_end_column(ui_ctx_t *ctx) {
+    ctx->layout.active = false;
+    float x = ctx->layout.x;
+    float y = ctx->layout.y;
+    float w = ctx->layout.item_w;
+    float h = ctx->layout.cursor_y + ctx->layout.padding;
+    return (ui_area_t){.x = x, .y = y, .w = w, .h = h};
+}
 
 bool ui_layout_cell(const ui_ctx_t *ctx, ui_rect_t *r) {
     if (!ctx->layout.active)
@@ -808,7 +828,7 @@ void ui_separator(ui_ctx_t *ctx, float x, float y, float len, float thickness, b
  * ui_scope / ui_scope_end
  * ========================================================= */
 
-void ui_scope(ui_ctx_t *ctx, float x, float y, float w, float h, const char *label) {
+ui_area_t ui_scope(ui_ctx_t *ctx, float x, float y, float w, float h, const char *label) {
     /* Push scoped ID so widget IDs inside are namespaced. */
     ui_layout_push_id(ctx, ui_id(label));
 
@@ -825,6 +845,7 @@ void ui_scope(ui_ctx_t *ctx, float x, float y, float w, float h, const char *lab
     /* background strip to break the border */
     ctx->renderer->draw_rect(lx - pad, ly, lw + pad * 2.f, th_, UI_COL_BG);
     ctx->renderer->draw_text(lx, ly, label, UI_COL_TEXT_DIM, ctx->font);
+    return (ui_area_t){.x = x, .y = y, .w = w, .h = h};
 }
 
 void ui_scope_end(ui_ctx_t *ctx) { ui_layout_pop_id(ctx); }

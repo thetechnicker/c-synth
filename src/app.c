@@ -208,23 +208,20 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     ui_ctx_t *ui = &app->ui;
 
     /* Layout constants */
-    const float IDK = 24.f;
+    // const float  = 24.f;
     const float MARGIN = 32.f;
     const float COL_W = 420.f; /* left column width  */
     const float ROW_H = 32.f;
     const float PAD = 8.f;
+    const float SCOPE_PAD = 14.f;
     float y = MARGIN;
 
-    /* ================================================================
-     * SECTION 1 — Theme selector  (horizontal row + buttons)
-     * ============================================================== */
-    ui_scope(ui, MARGIN, y, DEFAULT_WINDOW_WIDTH - MARGIN * 2.f, ROW_H + 20.f, "Theme");
-    y += 14.f; /* make room for scope label */
-
+    ui_area_t theme_area =
+        ui_scope(ui, MARGIN, y, DEFAULT_WINDOW_WIDTH - MARGIN * 2.f, ROW_H + PAD * 2.f, "Theme");
     {
         float col_w3 = (DEFAULT_WINDOW_WIDTH - MARGIN * 2.f - PAD * 2.f) / 3.f;
         float tw3[3] = {col_w3, col_w3, col_w3};
-        ui_layout_row(ui, MARGIN, y, 3, tw3, ROW_H);
+        ui_layout_row(ui, theme_area.x + PAD, theme_area.y + PAD, 3, tw3, ROW_H, 0);
         for (int i = 0; i < THEME_COUNT; ++i) {
             /* Use push_id so buttons with same label hash differently */
             ui_layout_push_id(ui, (ui_id_t)(uintptr_t)i);
@@ -234,174 +231,76 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         }
         ui_layout_end_row(ui);
     }
-
     ui_scope_end(ui);
-    y += ROW_H + IDK;
-    float top_y = y;
 
-    /* ================================================================
-     * SECTION 2 — Oscillator  (scope + mixed widgets)
-     * ============================================================== */
-    float scope_h = ROW_H * 4.f + PAD * 5.f + 14.f;
-    ui_scope(ui, MARGIN, y, COL_W, scope_h, "Oscillator");
-    y += 14.f;
-
+    y = theme_area.y + theme_area.h + MARGIN;
+    float scope_h = ROW_H * 4.f + PAD * 5.f + PAD * 2.f;
+    ui_area_t osc_area = ui_scope(ui, MARGIN, y, COL_W, scope_h, "Oscillator");
+    y = osc_area.y + PAD;
     /* Row 1: toggle + float slider */
     {
         float ws[2] = {100.f, COL_W - 100.f - PAD};
-        ui_layout_row(ui, MARGIN, y, 2, ws, ROW_H);
+        ui_layout_row(ui, osc_area.x + PAD, y, 2, ws, ROW_H, PAD);
         if (ui_toggle(ui, 0, 0, 0, 0, "On", &osc_on))
             LOGD("Oscillator toggled: %d", osc_on);
         if (ui_slider_f(ui, 0, 0, 0, 0, "Freq", &osc_freq, 20.f, 20000.f, "%.0f Hz"))
             LOGD("Freq: %.0f", osc_freq);
-        ui_layout_end_row(ui);
+        ui_area_t row = ui_layout_end_row(ui);
+        y = row.y + row.h + PAD;
     }
-    y += ROW_H + PAD;
 
     /* Row 2: waveform dropdown + pulse width slider */
     {
         float ws[2] = {140.f, COL_W - 140.f - PAD};
-        ui_layout_row(ui, MARGIN, y, 2, ws, ROW_H);
+        ui_layout_row(ui, osc_area.x + PAD, y, 2, ws, ROW_H, PAD);
         if (ui_dropdown(ui, 0, 0, 0, 0, "Wave", k_wave_names, WAVE_COUNT, &osc_wave))
             LOGD("Wave: %d", osc_wave);
         if (ui_slider_f(ui, 0, 0, 0, 0, "PW", &osc_pw, 0.05f, 0.95f, "%.2f"))
             LOGD("PW: %.2f", osc_pw);
-        ui_layout_end_row(ui);
+        ui_area_t row = ui_layout_end_row(ui);
+        y = row.y + row.h + PAD;
     }
-    y += ROW_H + PAD;
-
     /* Row 3: two knobs (volume + detune) */
     {
+        float ws[2] = {140.f, COL_W - 140.f - PAD};
+        ui_area_t row_s = ui_layout_row(ui, osc_area.x + PAD, y, 2, ws, ROW_H, PAD);
         static float detune = 0.f;
-        float kx = MARGIN;
-        float ky = y;
-        if (ui_knob(ui, kx, ky, 64.f, "Volume", &osc_volume, 0.f, 1.f, 0.005f, "%.2f"))
+        if (ui_knob(ui, row_s.x, row_s.y, 64.f, "Volume", &osc_volume, 0.f, 1.f, 0.005f, "%.2f"))
             LOGD("Volume: %.2f", osc_volume);
-        kx += 80.f;
-        if (ui_knob(ui, kx, ky, 64.f, "Detune", &detune, -50.f, 50.f, 0.5f, "%+.1f ct"))
+        if (ui_knob(ui, row_s.x + 80.f, row_s.y, 64.f, "Detune", &detune, -50.f, 50.f, 0.5f,
+                    "%+.1f ct"))
             LOGD("Detune: %.1f", detune);
+        ui_area_t row = ui_layout_end_row(ui);
+        y = row.y + row.h + PAD;
     }
-    y += 64.f + PAD + 20.f; /* knob height + label space */
-
     ui_scope_end(ui);
-    y += PAD;
 
-    /* ================================================================
-     * SECTION 3 — Filter  (scope, right column of main layout)
-     * ============================================================== */
-    float right_x = MARGIN + COL_W + PAD;
-    float right_w = DEFAULT_WINDOW_WIDTH - right_x - MARGIN;
-    // float filter_scope_top = MARGIN + ROW_H + IDK; /* align with osc scope */
+    y = theme_area.y + theme_area.h + MARGIN;
+    float x = osc_area.x + osc_area.w + MARGIN;
+    float w = DEFAULT_WINDOW_WIDTH - (x + MARGIN);
 
     float filter_scope_h = ROW_H * 3.f + PAD * 4.f + 14.f;
-    ui_scope(ui, right_x, top_y, right_w, filter_scope_h, "Filter");
-    float fy = top_y + 14.f;
-
-    /* Row 1: filter on/off + cutoff */
+    ui_area_t filter_area = ui_scope(ui, x, y, w, filter_scope_h, "Filter");
     {
-        float ws[2] = {100.f, right_w - 100.f - PAD};
-        ui_layout_row(ui, right_x, fy, 2, ws, ROW_H);
+        float ws[2] = {100.f, w - 100.f - PAD};
+        ui_layout_row(ui, x + PAD, filter_area.y + PAD, 2, ws, ROW_H, PAD);
         if (ui_toggle(ui, 0, 0, 0, 0, "On", &filter_on))
             LOGD("Filter on: %d", filter_on);
         if (ui_slider_f(ui, 0, 0, 0, 0, "Cutoff", &flt_cutoff, 20.f, 20000.f, "%.0f Hz"))
             LOGD("Cutoff: %.0f", flt_cutoff);
-        ui_layout_end_row(ui);
+        ui_area_t row = ui_layout_end_row(ui);
+        y = row.y + row.h + PAD;
     }
-    fy += ROW_H + PAD;
 
-    /* Row 2: resonance float slider */
-    if (ui_slider_f(ui, right_x, fy, right_w, ROW_H, "Resonance", &flt_res, 0.f, 1.f, "%.2f"))
+    ///* Row 2: resonance float slider */
+    if (ui_slider_f(ui, x + PAD, y, w, ROW_H, "Resonance", &flt_res, 0.f, 1.f, "%.2f"))
         LOGD("Res: %.2f", flt_res);
-    fy += ROW_H + PAD;
 
     /* Row 3: poles integer slider */
-    if (ui_slider_i(ui, right_x, fy, right_w, ROW_H, "Poles", &flt_poles, 1, 8, "%d"))
+    if (ui_slider_i(ui, x + PAD, y + ROW_H + PAD, w, ROW_H, "Poles", &flt_poles, 1, 8, "%d"))
         LOGD("Poles: %d", flt_poles);
 
     ui_scope_end(ui);
-
-    /* ================================================================
-     * SECTION 4 — Effects  (vertical column layout)
-     * ============================================================== */
-    float fx_top = top_y + filter_scope_h + PAD;
-    float fx_h = ROW_H * 2.f + PAD * 3.f + 14.f;
-    ui_scope(ui, right_x, fx_top, right_w, fx_h, "Effects");
-    float efy = fx_top + 14.f;
-
-    ui_layout_begin_column(ui, right_x, efy, right_w, ROW_H, PAD);
-    if (ui_toggle(ui, 0, 0, 0, 0, "Reverb", &reverb_on))
-        LOGD("Reverb: %d", reverb_on);
-    if (ui_slider_f(ui, 0, 0, 0, 0, "Mix", &reverb_mix, 0.f, 1.f, "%.2f"))
-        LOGD("Reverb mix: %.2f", reverb_mix);
-    ui_layout_end_column(ui);
-
-    ui_scope_end(ui);
-
-    /* ================================================================
-     * SECTION 5 — Separator + text input  (full width)
-     * ============================================================== */
-    ui_separator(ui, MARGIN, y, DEFAULT_WINDOW_WIDTH - MARGIN * 2.f, 2.f, false);
-    y += 10.f;
-
-    ui_label(ui, MARGIN, y + (ROW_H - (float)ui->font.glyph_h) * 0.5f,
-             "Patch name:", UI_COL_TEXT_DIM);
-    if (ui_text_input(ui, MARGIN + 90.f, y, DEFAULT_WINDOW_WIDTH - MARGIN * 2.f - 90.f, ROW_H,
-                      "Patch", patch_name, sizeof(patch_name)))
-        LOGD("Patch name: %s", patch_name);
-    y += ROW_H + PAD;
-
-    /* ================================================================
-     * SECTION 6 — Waveform display
-     * ============================================================== */
-    float disp_w = (DEFAULT_WINDOW_WIDTH - MARGIN * 3.f) * 0.5f;
-    float disp_h = 100.f;
-
-    ui_scope(ui, MARGIN, y, disp_w, disp_h + 20.f, "Waveform");
-    ui_waveform_display(ui, MARGIN + 4.f, y + 16.f, disp_w - 8.f, disp_h, s_wave, WAVE_SAMPLES,
-                        UI_COL_ACCENT);
-    ui_scope_end(ui);
-
-    /* ================================================================
-     * SECTION 7 — Spectrum display
-     * ============================================================== */
-    float spec_x = MARGIN + disp_w + PAD;
-    float spec_w = DEFAULT_WINDOW_WIDTH - spec_x - MARGIN;
-    ui_scope(ui, spec_x, y, spec_w, disp_h + 20.f, "Spectrum");
-    ui_spectrum_display(ui, spec_x + 4.f, y + 16.f, spec_w - 8.f, disp_h, s_spec, SPEC_BINS,
-                        UI_COL_ACCENT);
-    ui_scope_end(ui);
-
-    y += disp_h + 24.f + PAD;
-
-    /* ================================================================
-     * SECTION 8 — Vertical separator demo
-     * ============================================================== */
-    ui_separator(ui, MARGIN, y, DEFAULT_WINDOW_WIDTH - MARGIN * 2.f, 2.f, false);
-    y += 10.f;
-
-    /* Two panels side by side with a vertical separator between them */
-    {
-        float half = (DEFAULT_WINDOW_WIDTH - MARGIN * 2.f - 10.f) * 0.5f;
-
-        /* Left: label grid using layout column */
-        ui_layout_begin_column(ui, MARGIN, y, half, 20.f, 4.f);
-        ui_label(ui, 0, 0, "layout_begin_column demo", UI_COL_TEXT_DIM);
-        ui_label(ui, 0, 0, "each label placed by the layout engine", UI_COL_TEXT_DIM);
-        ui_label(ui, 0, 0, "no manual x/y coordinates needed", UI_COL_TEXT_DIM);
-        ui_layout_end_column(ui);
-
-        /* Vertical separator */
-        ui_separator(ui, MARGIN + half + 4.f, y, 64.f, 2.f, true);
-
-        /* Right: second instance of the same labels but with scoped IDs */
-        ui_layout_push_id(ui, ui_id("right_panel"));
-        ui_layout_begin_column(ui, MARGIN + half + 10.f, y, half, 20.f, 4.f);
-        ui_label(ui, 0, 0, "ui_layout_push_id demo", UI_COL_TEXT_DIM);
-        ui_label(ui, 0, 0, "same label strings — unique widget IDs", UI_COL_TEXT_DIM);
-        ui_label(ui, 0, 0, "push/pop prevents hash collisions", UI_COL_TEXT_DIM);
-        ui_layout_end_column(ui);
-        ui_layout_pop_id(ui);
-    }
 
     /* ---- end frame ---- */
     ui_ctx_end_frame(ui);
@@ -504,3 +403,86 @@ void create_app_argparse(ArgParse *ap) {
  * printf("Opened input: %s\n", Pm_GetDeviceInfo(input_id)->name);
  * app->stream = stream;
  */
+
+///* ================================================================
+// * SECTION 4 — Effects  (vertical column layout)
+// * ============================================================== */
+// float fx_top = top_y + filter_scope_h + PAD;
+// float fx_h = ROW_H * 2.f + PAD * 3.f + 14.f;
+// ui_scope(ui, right_x, fx_top, right_w, fx_h, "Effects");
+// float efy = fx_top + 14.f;
+
+// ui_layout_begin_column(ui, right_x, efy, right_w, ROW_H, PAD);
+// if (ui_toggle(ui, 0, 0, 0, 0, "Reverb", &reverb_on))
+//     LOGD("Reverb: %d", reverb_on);
+// if (ui_slider_f(ui, 0, 0, 0, 0, "Mix", &reverb_mix, 0.f, 1.f, "%.2f"))
+//     LOGD("Reverb mix: %.2f", reverb_mix);
+// ui_layout_end_column(ui);
+
+// ui_scope_end(ui);
+
+///* ================================================================
+// * SECTION 5 — Separator + text input  (full width)
+// * ============================================================== */
+// ui_separator(ui, MARGIN, y, DEFAULT_WINDOW_WIDTH - MARGIN * 2.f, 2.f, false);
+// y += 10.f;
+
+// ui_label(ui, MARGIN, y + (ROW_H - (float)ui->font.glyph_h) * 0.5f,
+//          "Patch name:", UI_COL_TEXT_DIM);
+// if (ui_text_input(ui, MARGIN + 90.f, y, DEFAULT_WINDOW_WIDTH - MARGIN * 2.f - 90.f, ROW_H,
+//                   "Patch", patch_name, sizeof(patch_name)))
+//     LOGD("Patch name: %s", patch_name);
+// y += ROW_H + PAD;
+
+///* ================================================================
+// * SECTION 6 — Waveform display
+// * ============================================================== */
+// float disp_w = (DEFAULT_WINDOW_WIDTH - MARGIN * 3.f) * 0.5f;
+// float disp_h = 100.f;
+
+// ui_scope(ui, MARGIN, y, disp_w, disp_h + 20.f, "Waveform");
+// ui_waveform_display(ui, MARGIN + 4.f, y + 16.f, disp_w - 8.f, disp_h, s_wave, WAVE_SAMPLES,
+//                     UI_COL_ACCENT);
+// ui_scope_end(ui);
+
+///* ================================================================
+// * SECTION 7 — Spectrum display
+// * ============================================================== */
+// float spec_x = MARGIN + disp_w + PAD;
+// float spec_w = DEFAULT_WINDOW_WIDTH - spec_x - MARGIN;
+// ui_scope(ui, spec_x, y, spec_w, disp_h + 20.f, "Spectrum");
+// ui_spectrum_display(ui, spec_x + 4.f, y + 16.f, spec_w - 8.f, disp_h, s_spec, SPEC_BINS,
+//                    UI_COL_ACCENT);
+// ui_scope_end(ui);
+
+// y += disp_h + 24.f + PAD;
+
+///* ================================================================
+// * SECTION 8 — Vertical separator demo
+// * ============================================================== */
+// ui_separator(ui, MARGIN, y, DEFAULT_WINDOW_WIDTH - MARGIN * 2.f, 2.f, false);
+// y += 10.f;
+
+///* Two panels side by side with a vertical separator between them */
+//{
+//    float half = (DEFAULT_WINDOW_WIDTH - MARGIN * 2.f - 10.f) * 0.5f;
+
+//    /* Left: label grid using layout column */
+//    ui_layout_begin_column(ui, MARGIN, y, half, 20.f, 4.f);
+//    ui_label(ui, 0, 0, "layout_begin_column demo", UI_COL_TEXT_DIM);
+//    ui_label(ui, 0, 0, "each label placed by the layout engine", UI_COL_TEXT_DIM);
+//    ui_label(ui, 0, 0, "no manual x/y coordinates needed", UI_COL_TEXT_DIM);
+//    ui_layout_end_column(ui);
+
+//    /* Vertical separator */
+//    ui_separator(ui, MARGIN + half + 4.f, y, 64.f, 2.f, true);
+
+//    /* Right: second instance of the same labels but with scoped IDs */
+//    ui_layout_push_id(ui, ui_id("right_panel"));
+//    ui_layout_begin_column(ui, MARGIN + half + 10.f, y, half, 20.f, 4.f);
+//    ui_label(ui, 0, 0, "ui_layout_push_id demo", UI_COL_TEXT_DIM);
+//    ui_label(ui, 0, 0, "same label strings — unique widget IDs", UI_COL_TEXT_DIM);
+//    ui_label(ui, 0, 0, "push/pop prevents hash collisions", UI_COL_TEXT_DIM);
+//    ui_layout_end_column(ui);
+//    ui_layout_pop_id(ui);
+//}

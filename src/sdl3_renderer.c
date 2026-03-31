@@ -1214,6 +1214,8 @@ ui_font_t ui_font_builtin(void) {
     };
 }
 
+SDL_Window *get_sdl_window(void) { return ctx.win; }
+
 /* =========================================================
  * Renderer descriptor
  * ========================================================= */
@@ -1232,6 +1234,7 @@ static const ui_renderer_t sdl3_renderer = {
     .destroy_texture = sdl3_destroy_texture,
     .get_buildin_font = ui_font_builtin,
     .on_resize = sdl3_on_resize,
+    .get_window = get_sdl_window,
 };
 
 /* =========================================================

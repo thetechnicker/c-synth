@@ -83,19 +83,19 @@
   - [~] `ui_slider_i(ctx, label, value*, min, max)` → `bool`
   - [x] `ui_knob(ctx, label, value*, min, max)` — rotary control, mouse drag
   - [x] `ui_toggle(ctx, label, value*)` — on/off LED button
-  - [ ] `ui_dropdown(ctx, label, items[], count, selected*)` → `bool`
-  - [ ] `ui_text_input(ctx, label, buf, buf_len)` → `bool`
-  - [ ] `ui_separator(ctx)`
-  - [ ] `ui_scope(ctx, label)` / `ui_scope_end(ctx)` — group / panel
-- [~] Layout engine:
-  - [~] `ui_layout_row(ctx, cols, widths[])` — fixed column row
-  - [~] `ui_layout_push_id(ctx, id)` / `ui_layout_pop_id(ctx)` — scope nesting
+  - [x] `ui_dropdown(ctx, label, items[], count, selected*)` → `bool`
+  - [x] `ui_text_input(ctx, label, buf, buf_len)` → `bool`
+  - [x] `ui_separator(ctx)`
+  - [x] `ui_scope(ctx, label)` / `ui_scope_end(ctx)` — group / panel
+- [x] Layout engine:
+  - [x] `ui_layout_row(ctx, cols, widths[])` — fixed column row
+  - [x] `ui_layout_push_id(ctx, id)` / `ui_layout_pop_id(ctx)` — scope nesting
   - Horizontal and vertical flow modes
   - Auto-sizing with min/max constraints
 - [x] Mouse input routing from `SDL_AppEvent` → `ui_ctx_t` (`mouse_x`, `mouse_y`, `mouse_buttons`, `scroll`)
-- [ ] Keyboard input routing for text fields and keyboard shortcuts
-- [ ] `ui_waveform_display(ctx, samples, count)` — oscilloscope widget (line-draw via renderer)
-- [ ] `ui_spectrum_display(ctx, bins, count)` — FFT magnitude bars
+- [x] Keyboard input routing for text fields and keyboard shortcuts
+- [x] `ui_waveform_display(ctx, samples, count)` — oscilloscope widget (line-draw via renderer)
+- [x] `ui_spectrum_display(ctx, bins, count)` — FFT magnitude bars
 
 ### 1.6 Theming
 

@@ -1,6 +1,7 @@
 #ifndef UI_H
 #define UI_H
 
+#include "SDL3/SDL.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -51,6 +52,9 @@ typedef struct ui_renderer_t {
 
     /* optional: framebuffer/resize */
     void (*on_resize)(int width, int height);
+
+    /* window */
+    SDL_Window *(*get_window)(void);
 } ui_renderer_t;
 
 #if defined(_MSC_VER)

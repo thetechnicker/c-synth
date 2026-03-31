@@ -234,8 +234,8 @@
 
 ## Infrastructure / Ongoing
 
-- [ ] Fix `App_t.config` field: currently `HashMap` by value but hashmap API uses pointers — change to `HashMap*`
-- [ ] `hashmap_free` does not free `ArgParseResult*` values — add a `hashmap_free_values(map, free_fn)` helper
+- [x] Fix `App_t.config` field: currently `HashMap` by value but hashmap API uses pointers — change to `HashMap*`
+- [?] `hashmap_free` does not free `ArgParseResult*` values — add a `hashmap_free_values(map, free_fn)` helper
 - [ ] `log.c`: `fopen_s` and `gmtime_s` are MSVC/C11 Annex K; add POSIX fallback (`fopen`, `gmtime_r`) for GCC/Clang
 - [ ] Replace `sprintf` in `app.c` with `snprintf` (buffer overflow risk in title string)
 - [ ] Add `--fullscreen` flag; current code hardcodes `SDL_WINDOW_FULLSCREEN`

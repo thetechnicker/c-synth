@@ -875,14 +875,14 @@ bool ui_dropdown(ui_ctx_t *ctx, float x, float y, float w, float h, const char *
 
     ui_id_t id = scoped_id(ctx, label);
     bool hovered = pt_in_rect(ctx->mouse_x, ctx->mouse_y, x, y, w, h);
-    bool is_open = (ctx->active == id);
+    bool is_open = (ctx->focused == id);
     bool changed = false;
 
     /* Toggle open on header click. */
     if (hovered)
         ctx->hot = id;
     if (hovered && ctx->mouse_pressed) {
-        ctx->active = is_open ? 0 : id;
+        ctx->focused = is_open ? 0 : id;
         is_open = !is_open;
     }
 
@@ -935,6 +935,10 @@ bool ui_dropdown(ui_ctx_t *ctx, float x, float y, float w, float h, const char *
         if (ctx->mouse_pressed && !pt_in_rect(ctx->mouse_x, ctx->mouse_y, x, y, w, h + list_h)) {
             ctx->active = 0;
         }
+    }
+    if (!hovered && ctx->mouse_pressed) {
+        ctx->focused = is_open ? 0 : ctx->focused;
+        is_open = false;
     }
 
     return changed;

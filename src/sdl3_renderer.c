@@ -114,6 +114,7 @@ static void sdl3_draw_line(float x1, float y1, float x2, float y2, ui_color_t co
 static void sdl3_draw_text(float x, float y, const char *text, ui_color_t color, ui_font_t font);
 static void sdl3_draw_image(float x, float y, float w, float h, ui_texture_t texture,
                             ui_color_t tint);
+static void sdl3_set_layer(uint8_t layer);
 
 static Uint8 *to_rgba(const void *pixels, int w, int h, int channels);
 static ui_texture_t sdl3_create_texture(const void *pixels, int w, int h, int channels);
@@ -182,6 +183,7 @@ typedef enum { CMD_RECT, CMD_LINE, CMD_TEXT, CMD_IMAGE } cmd_type_t;
 
 typedef struct {
     cmd_type_t type;
+    uint8_t    layer;  /* Z layer — higher = drawn on top */
     union {
         struct {
             float x, y, w, h;
@@ -250,6 +252,8 @@ typedef struct {
     /* ---------- deferred command list ---------- */
     draw_cmd_t cmds[MAX_CMDS];
     Uint32 ncmds;
+    uint8_t cur_layer;           /* layer stamped onto new commands      */
+    Uint32 sorted[MAX_CMDS];     /* index array filled by layer sort     */
     char spool[STR_POOL_SIZE];
     Uint32 spool_used;
 
@@ -660,6 +664,39 @@ static void push_text_verts(float x, float y, const char *text, ui_color_t col, 
 }
 
 /* =========================================================
+ * Layer sort
+ *
+ * Fills ctx.sorted[0..ncmds] with command indices ordered by layer,
+ * stable within each layer (preserves insertion order).
+ *
+ * Uses a counting sort — O(n), zero allocations.
+ * Layer values are expected to be small integers (0–3 in practice;
+ * the algorithm is correct for any uint8_t value 0-255).
+ * ========================================================= */
+
+#define LAYER_BUCKETS 256
+
+static void build_layer_sort(void) {
+    Uint32 counts[LAYER_BUCKETS] = {0};
+    Uint32 offsets[LAYER_BUCKETS];
+
+    for (Uint32 i = 0; i < ctx.ncmds; ++i)
+        counts[ctx.cmds[i].layer]++;
+
+    offsets[0] = 0;
+    for (int b = 1; b < LAYER_BUCKETS; ++b)
+        offsets[b] = offsets[b - 1] + counts[b - 1];
+
+    /* Scatter each command index into its layer bucket. */
+    Uint32 cursors[LAYER_BUCKETS];
+    for (int b = 0; b < LAYER_BUCKETS; ++b)
+        cursors[b] = offsets[b];
+
+    for (Uint32 i = 0; i < ctx.ncmds; ++i)
+        ctx.sorted[cursors[ctx.cmds[i].layer]++] = i;
+}
+
+/* =========================================================
  * GPU: per-frame flush
  *
  * Pass 1 — convert every deferred command to vertices in CPU scratch.
@@ -671,8 +708,11 @@ static void gpu_flush(void) {
     ctx.ncverts = 0;
     ctx.ntverts = 0;
 
-    /* ---------- Pass 1: build vertices ---------- */
-    for (Uint32 i = 0; i < ctx.ncmds; ++i) {
+    build_layer_sort();
+
+    /* ---------- Pass 1: build vertices (in sorted layer order) ---------- */
+    for (Uint32 s = 0; s < ctx.ncmds; ++s) {
+        Uint32 i = ctx.sorted[s];
         draw_cmd_t *c = &ctx.cmds[i];
         ctx.cv_off[i] = ctx.ncverts;
         ctx.tv_off[i] = ctx.ntverts;
@@ -751,7 +791,8 @@ static void gpu_flush(void) {
 
     SDL_GPUGraphicsPipeline *active = NULL;
 
-    for (Uint32 i = 0; i < ctx.ncmds; ++i) {
+    for (Uint32 s = 0; s < ctx.ncmds; ++s) {
+        Uint32 i = ctx.sorted[s];
         draw_cmd_t *c = &ctx.cmds[i];
         bool tex = (c->type == CMD_TEXT || c->type == CMD_IMAGE);
         SDL_GPUGraphicsPipeline *want = tex ? ctx.tpipe : ctx.cpipe;
@@ -841,7 +882,9 @@ static void rdr_thick_line(float x1, float y1, float x2, float y2, float thick, 
 }
 
 static void rdr_flush(void) {
-    for (Uint32 i = 0; i < ctx.ncmds; ++i) {
+    build_layer_sort();
+    for (Uint32 s = 0; s < ctx.ncmds; ++s) {
+        Uint32 i = ctx.sorted[s];
         draw_cmd_t *c = &ctx.cmds[i];
 
         switch (c->type) {
@@ -920,7 +963,7 @@ static void sdl3_draw_rect(float x, float y, float w, float h, ui_color_t color)
     if (ctx.ncmds >= MAX_CMDS)
         return;
     draw_cmd_t *c = &ctx.cmds[ctx.ncmds++];
-    *c = (draw_cmd_t){.type = CMD_RECT, .rect = {x, y, w, h, color}};
+    *c = (draw_cmd_t){.type = CMD_RECT, .layer = ctx.cur_layer, .rect = {x, y, w, h, color}};
 }
 
 static void sdl3_draw_line(float x1, float y1, float x2, float y2, ui_color_t color,
@@ -928,7 +971,8 @@ static void sdl3_draw_line(float x1, float y1, float x2, float y2, ui_color_t co
     if (ctx.ncmds >= MAX_CMDS)
         return;
     draw_cmd_t *c = &ctx.cmds[ctx.ncmds++];
-    *c = (draw_cmd_t){.type = CMD_LINE, .line = {x1, y1, x2, y2, thickness, color}};
+    *c = (draw_cmd_t){.type = CMD_LINE, .layer = ctx.cur_layer,
+                      .line = {x1, y1, x2, y2, thickness, color}};
 }
 
 static void sdl3_draw_text(float x, float y, const char *text, ui_color_t color, ui_font_t font) {
@@ -940,6 +984,7 @@ static void sdl3_draw_text(float x, float y, const char *text, ui_color_t color,
 
     draw_cmd_t *c = &ctx.cmds[ctx.ncmds++];
     c->type = CMD_TEXT;
+    c->layer = ctx.cur_layer;
     c->text.x = x;
     c->text.y = y;
     c->text.col = color;
@@ -954,7 +999,12 @@ static void sdl3_draw_image(float x, float y, float w, float h, ui_texture_t tex
     if (ctx.ncmds >= MAX_CMDS)
         return;
     draw_cmd_t *c = &ctx.cmds[ctx.ncmds++];
-    *c = (draw_cmd_t){.type = CMD_IMAGE, .image = {x, y, w, h, texture, tint}};
+    *c = (draw_cmd_t){.type = CMD_IMAGE, .layer = ctx.cur_layer,
+                      .image = {x, y, w, h, texture, tint}};
+}
+
+static void sdl3_set_layer(uint8_t layer) {
+    ctx.cur_layer = layer;
 }
 
 /* =========================================================
@@ -1138,6 +1188,7 @@ static bool sdl3_init(int width, int height, const char *title) {
 static void sdl3_begin_frame(void) {
     ctx.ncmds = 0;
     ctx.spool_used = 0;
+    ctx.cur_layer = 0;
 
     if (ctx.path == PATH_GPU) {
         ctx.cmd = SDL_AcquireGPUCommandBuffer(ctx.gpu);
@@ -1230,6 +1281,7 @@ static const ui_renderer_t sdl3_renderer = {
     .draw_line = sdl3_draw_line,
     .draw_text = sdl3_draw_text,
     .draw_image = sdl3_draw_image,
+    .set_layer = sdl3_set_layer,
     .create_texture = sdl3_create_texture,
     .destroy_texture = sdl3_destroy_texture,
     .get_buildin_font = ui_font_builtin,

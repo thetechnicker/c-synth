@@ -55,6 +55,15 @@ static inline ui_id_t ui_id(const char *label) {
 #define UI_ID(label) ui_id(label)
 
 /* =========================================================
+ * Z layer constants  (passed to renderer->set_layer)
+ * ========================================================= */
+
+#define UI_LAYER_NORMAL  ((uint8_t)0)  /* regular widgets          */
+#define UI_LAYER_POPUP   ((uint8_t)1)  /* dropdowns, context menus */
+#define UI_LAYER_MODAL   ((uint8_t)2)  /* modal overlays           */
+#define UI_LAYER_TOOLTIP ((uint8_t)3)  /* tooltips                 */
+
+/* =========================================================
  * Theming
  * ========================================================= */
 
@@ -198,6 +207,20 @@ typedef struct {
 
     /* --- layout --- */
     ui_layout_t layout;
+
+    /* --- overlay / popup state ---
+     *
+     * When a popup widget (dropdown, context menu, …) is open it registers
+     * its screen-space bounding rect here.  ui_ctx_overlay_blocks() returns
+     * true when a point falls inside that rect, allowing other widgets to
+     * skip their hover/click logic and yield input to the popup.
+     *
+     * Only one overlay rect is tracked at a time; the topmost popup wins.
+     * Set overlay_id to 0 to clear (done automatically at begin_frame when
+     * no popup was registered during the previous frame).
+     */
+    ui_id_t    overlay_id;    /* ID of the widget that owns the overlay  */
+    ui_area_t  overlay_rect;  /* full bounding box of the open popup     */
 } ui_ctx_t;
 
 /* =========================================================
@@ -208,6 +231,24 @@ void ui_ctx_init(ui_ctx_t *ctx, const ui_renderer_t *renderer);
 void ui_ctx_feed_event(ui_ctx_t *ctx, const SDL_Event *event);
 void ui_ctx_begin_frame(ui_ctx_t *ctx);
 void ui_ctx_end_frame(ui_ctx_t *ctx);
+
+/*
+ * ui_ctx_overlay_blocks — returns true when the point (px, py) falls inside
+ * the currently registered overlay rect AND the querying widget is not the
+ * overlay owner itself.
+ *
+ * Widgets should call this before processing hover/click state:
+ *
+ *   if (!ui_ctx_overlay_blocks(ctx, id, x, y, w, h)) {
+ *       // normal hit-test logic
+ *   }
+ *
+ * Passing the widget's own id allows the overlay owner to still receive
+ * input for its header (e.g. the dropdown header button stays clickable
+ * while the list is open).
+ */
+bool ui_ctx_overlay_blocks(const ui_ctx_t *ctx, ui_id_t self_id,
+                            float x, float y, float w, float h);
 
 /* =========================================================
  * Scope / ID nesting

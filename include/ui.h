@@ -50,6 +50,21 @@ typedef struct ui_renderer_t {
     /* build in font */
     ui_font_t (*get_buildin_font)(void);
 
+    /*
+     * set_layer — set the Z layer for subsequent draw calls.
+     *
+     * Layer 0 is the default (normal widgets).
+     * Higher layers are drawn on top regardless of call order.
+     * Layers are reset to 0 at begin_frame.
+     *
+     * Suggested layer constants (defined in ui_widgets.h):
+     *   UI_LAYER_NORMAL   0  — regular widgets
+     *   UI_LAYER_POPUP    1  — dropdowns, context menus
+     *   UI_LAYER_MODAL    2  — modal overlays
+     *   UI_LAYER_TOOLTIP  3  — tooltips
+     */
+    void (*set_layer)(uint8_t layer);
+
     /* optional: framebuffer/resize */
     void (*on_resize)(int width, int height);
 

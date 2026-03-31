@@ -1,9 +1,9 @@
 #include "app.h"
 #include "argparse.h"
+#include "audio.h"
 #include "log.h"
 #include "ui.h"
 #include "ui_widgets.h"
-// #include "midi.h"
 #include "version.h"
 #include <math.h>
 #include <stdbool.h>
@@ -126,8 +126,10 @@ static void update_spectrum(float t) {
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     log_init("app.log.jsonl", LOG_DEBUG);
     LOGI("Application is starting up ...");
+
     LOGD("Application data at: %s", SDL_GetBasePath());
     LOGD("Current workdir is: %s", SDL_GetCurrentDirectory());
+    //SDL_SetAppMetadata(PROJECT_NAME, PROJECT_GIT_DESCRIBE, const char *appidentifier);
 
     ArgParse *ap = malloc(sizeof(ArgParse));
     CHECK_ERR_SDL(argparse_init(ap, "C-Synth", NULL, NULL, 0));
@@ -166,6 +168,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
 
     /* Start on the dark theme */
     ui_set_theme(&UI_THEME_DARK);
+
+    SDL_CreateThread(audio_thread, "audio_thread", NULL);
 
     *appstate = app;
     LOGI("Application startup complete");

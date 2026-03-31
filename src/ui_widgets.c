@@ -254,6 +254,10 @@ void ui_ctx_begin_frame(ui_ctx_t *ctx) {
     ctx->key_end = false;
     ctx->key_enter = false;
     ctx->key_escape = false;
+    /* overlay is re-registered each frame by the owning widget; clear here
+     * so a widget that stops rendering no longer blocks input. */
+    ctx->overlay_id = 0;
+    ctx->overlay_rect = (ui_area_t){0};
 }
 
 void ui_ctx_end_frame(ui_ctx_t *ctx) {
@@ -262,6 +266,17 @@ void ui_ctx_end_frame(ui_ctx_t *ctx) {
     /* If something was clicked that is NOT a text widget, drop focus. */
     // if (ctx->mouse_pressed && ctx->active != ctx->focused)
     //     ctx->focused = 0;
+}
+
+bool ui_ctx_overlay_blocks(const ui_ctx_t *ctx, ui_id_t self_id,
+                            float x, float y, float w, float h) {
+    (void)x; (void)y; (void)w; (void)h;
+    if (!ctx->overlay_id || ctx->overlay_id == self_id)
+        return false;
+    /* Block if the widget's rect intersects the open overlay rect. */
+    const ui_area_t *o = &ctx->overlay_rect;
+    return !(x + w <= o->x || x >= o->x + o->w ||
+             y + h <= o->y || y >= o->y + o->h);
 }
 
 /* =========================================================
@@ -411,7 +426,8 @@ bool ui_button(ui_ctx_t *ctx, float x, float y, float w, float h, const char *la
     }
 
     ui_id_t id = scoped_id(ctx, label);
-    bool hovered = pt_in_rect(ctx->mouse_x, ctx->mouse_y, x, y, w, h);
+    bool hovered = pt_in_rect(ctx->mouse_x, ctx->mouse_y, x, y, w, h)
+                   && !ui_ctx_overlay_blocks(ctx, id, x, y, w, h);
     bool clicked = false;
 
     if (hovered)
@@ -451,7 +467,8 @@ bool ui_toggle(ui_ctx_t *ctx, float x, float y, float w, float h, const char *la
     }
 
     ui_id_t id = scoped_id(ctx, label);
-    bool hovered = pt_in_rect(ctx->mouse_x, ctx->mouse_y, x, y, w, h);
+    bool hovered = pt_in_rect(ctx->mouse_x, ctx->mouse_y, x, y, w, h)
+                   && !ui_ctx_overlay_blocks(ctx, id, x, y, w, h);
     bool changed = false;
 
     if (hovered)
@@ -501,7 +518,8 @@ bool ui_slider_f(ui_ctx_t *ctx, float x, float y, float w, float h, const char *
     ui_id_t id = scoped_id(ctx, label);
     float val_lbl_w = 8.0f * (float)ctx->font.glyph_w + 4.f;
     float bar_w = (w - val_lbl_w < 10.f) ? 10.f : w - val_lbl_w;
-    bool hovered = pt_in_rect(ctx->mouse_x, ctx->mouse_y, x, y, bar_w, h);
+    bool hovered = pt_in_rect(ctx->mouse_x, ctx->mouse_y, x, y, bar_w, h)
+                   && !ui_ctx_overlay_blocks(ctx, id, x, y, bar_w, h);
     bool focused = (ctx->focused == id);
     bool changed = false;
 
@@ -600,7 +618,8 @@ bool ui_slider_i(ui_ctx_t *ctx, float x, float y, float w, float h, const char *
     ui_id_t id = scoped_id(ctx, label);
     float val_lbl_w = 8.0f * (float)ctx->font.glyph_w + 4.f;
     float bar_w = (w - val_lbl_w < 10.f) ? 10.f : w - val_lbl_w;
-    bool hovered = pt_in_rect(ctx->mouse_x, ctx->mouse_y, x, y, bar_w, h);
+    bool hovered = pt_in_rect(ctx->mouse_x, ctx->mouse_y, x, y, bar_w, h)
+                   && !ui_ctx_overlay_blocks(ctx, id, x, y, bar_w, h);
     bool focused = (ctx->focused == id);
     bool changed = false;
 
@@ -710,7 +729,8 @@ bool ui_knob(ui_ctx_t *ctx, float x, float y, float diameter, const char *label,
 
     float r = diameter * 0.5f, cx = x + r, cy = y + r;
     ui_id_t id = scoped_id(ctx, label);
-    bool hovered = pt_in_rect(ctx->mouse_x, ctx->mouse_y, x, y, diameter, diameter);
+    bool hovered = pt_in_rect(ctx->mouse_x, ctx->mouse_y, x, y, diameter, diameter)
+                   && !ui_ctx_overlay_blocks(ctx, id, x, y, diameter, diameter);
     bool focused = (ctx->focused == id);
     bool changed = false;
 
@@ -874,7 +894,10 @@ bool ui_dropdown(ui_ctx_t *ctx, float x, float y, float w, float h, const char *
     }
 
     ui_id_t id = scoped_id(ctx, label);
-    bool hovered = pt_in_rect(ctx->mouse_x, ctx->mouse_y, x, y, w, h);
+    /* Header hover: the dropdown header is always hittable — it is the
+     * overlay owner itself, so ui_ctx_overlay_blocks returns false for it. */
+    bool hovered = pt_in_rect(ctx->mouse_x, ctx->mouse_y, x, y, w, h)
+                   && !ui_ctx_overlay_blocks(ctx, id, x, y, w, h);
     bool is_open = (ctx->focused == id);
     bool changed = false;
 
@@ -884,6 +907,14 @@ bool ui_dropdown(ui_ctx_t *ctx, float x, float y, float w, float h, const char *
     if (hovered && ctx->mouse_pressed) {
         ctx->focused = is_open ? 0 : id;
         is_open = !is_open;
+    }
+
+    /* While open, register the full bounding rect (header + list) as the
+     * overlay so other widgets yield input to us. */
+    if (is_open) {
+        float list_h = (float)count * h;
+        ctx->overlay_id   = id;
+        ctx->overlay_rect = (ui_area_t){x, y, w, h + list_h};
     }
 
     /* Draw header */
@@ -904,10 +935,13 @@ bool ui_dropdown(ui_ctx_t *ctx, float x, float y, float w, float h, const char *
     ctx->renderer->draw_line(ax, ay, ax + aw * 0.5f, ay + ah, UI_COL_TEXT_DIM, 1.5f);
     ctx->renderer->draw_line(ax + aw * 0.5f, ay + ah, ax + aw, ay, UI_COL_TEXT_DIM, 1.5f);
 
-    /* Draw open list */
+    /* Draw open list — on UI_LAYER_POPUP so it renders above all normal widgets. */
     if (is_open) {
         float ly = y + h;
         float list_h = (float)count * h;
+
+        ctx->renderer->set_layer(UI_LAYER_POPUP);
+
         /* Background panel for the list */
         ctx->renderer->draw_rect(x, ly, w, list_h, UI_COL_SURFACE);
         draw_border(ctx, x, ly, w, list_h, UI_COL_BORDER);
@@ -920,8 +954,10 @@ bool ui_dropdown(ui_ctx_t *ctx, float x, float y, float w, float h, const char *
                 ctx->renderer->draw_rect(x, iy, w, h, UI_COL_SURFACE_HO);
                 if (ctx->mouse_pressed) {
                     *selected = i;
-                    ctx->active = 0; /* close */
-                    changed = true;
+                    ctx->focused = 0;
+                    ctx->active  = 0;
+                    is_open  = false;
+                    changed  = true;
                 }
             } else if (i == *selected) {
                 ctx->renderer->draw_rect(x, iy, w, h, UI_COL_ACCENT_DIM);
@@ -931,14 +967,16 @@ bool ui_dropdown(ui_ctx_t *ctx, float x, float y, float w, float h, const char *
                                      ctx->font);
         }
 
+        ctx->renderer->set_layer(UI_LAYER_NORMAL);
+
         /* Close if mouse pressed outside the whole dropdown */
         if (ctx->mouse_pressed && !pt_in_rect(ctx->mouse_x, ctx->mouse_y, x, y, w, h + list_h)) {
-            ctx->active = 0;
+            ctx->focused = 0;
+            ctx->active  = 0;
         }
     }
-    if (!hovered && ctx->mouse_pressed) {
-        ctx->focused = is_open ? 0 : ctx->focused;
-        is_open = false;
+    if (!hovered && ctx->mouse_pressed && !is_open) {
+        ctx->focused = 0;
     }
 
     return changed;
@@ -960,7 +998,8 @@ bool ui_text_input(ui_ctx_t *ctx, float x, float y, float w, float h, const char
     }
 
     ui_id_t id = scoped_id(ctx, label);
-    bool hovered = pt_in_rect(ctx->mouse_x, ctx->mouse_y, x, y, w, h);
+    bool hovered = pt_in_rect(ctx->mouse_x, ctx->mouse_y, x, y, w, h)
+                   && !ui_ctx_overlay_blocks(ctx, id, x, y, w, h);
     bool focused = (ctx->focused == id);
     bool changed = false;
 

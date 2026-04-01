@@ -99,10 +99,10 @@
 
 ### 1.6 Theming
 
-- [ ] `ui_theme_t` struct: color palette (background, surface, accent, text, disabled, danger)
-- [ ] Built-in themes: `UI_THEME_DARK`, `UI_THEME_LIGHT`, `UI_THEME_SYNTHWAVE`
-- [ ] `ui_set_theme(ctx, theme*)` — hot-switchable at runtime
-- [ ] Font size / DPI scale factor in theme
+- [x] `ui_theme_t` struct: color palette (background, surface, accent, text, disabled, danger)
+- [x] Built-in themes: `UI_THEME_DARK`, `UI_THEME_LIGHT`, `UI_THEME_SYNTHWAVE`
+- [x] `ui_set_theme(ctx, theme*)` — hot-switchable at runtime
+- [x] Font size / DPI scale factor in theme
 
 ---
 
@@ -110,8 +110,10 @@
 
 ### 2.1 Audio Output
 
-- [ ] Open SDL3 audio device (`SDL_OpenAudioDeviceStream`) in `app.c`
-- [ ] Define audio callback signature: `audio_callback(userdata, stream, len)`
+- [~] Open SDL3 audio device (`SDL_OpenAudioDeviceStream`) in `app.c`
+        note: stream opend in `synth_thread` inside `synth.c`.
+- [~] Define audio callback signature: `audio_callback(userdata, stream, len)`
+        note: currently uses `SDL_PutAudioStreamData` in a while loop in `synth_thread`.
 - [ ] `audio_ctx_t`: sample rate, buffer size, channel count, format (F32LE)
 - [ ] Atomic double-buffer for synth → audio thread handoff (lock-free ring buffer)
 - [ ] CLI flags: `--sample-rate`, `--buffer-size`, `--channels`

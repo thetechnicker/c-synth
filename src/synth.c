@@ -121,7 +121,7 @@ int synth_thread(void *data) {
     // Play for ~5 seconds as example (you can use your running flag instead)
     // int total_frames = SR * 5;
     while (SDL_GetAtomicInt(&this->running) != 0) {
-        fill_sine_block_fast(&osc, block, BLOCK);
+        fill_sine_block(&osc, block, BLOCK);
         int bytes = BLOCK * CH * sizeof(float);
         SDL_PutAudioStreamData(stream, block, bytes);
     }

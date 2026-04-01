@@ -5,7 +5,12 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 project(synth C)
 
 # Options
-option(ENABLE_SSE "Enable SSE optimizations" OFF)
+option(ENABLE_SSE             "Enable SSE2 optimizations"                    OFF)
+option(ENABLE_FAST_MATH       "Enable -ffast-math / /fp:fast"                OFF)
+option(ENABLE_NO_MATH_ERRNO   "Enable -fno-math-errno / /fp:except-"         OFF)
+option(ENABLE_FINITE_MATH     "Enable -ffinite-math-only"                    OFF)
+option(ENABLE_ASSOCIATIVE_MATH "Enable -fassociative-math"                  OFF)
+option(ENABLE_O3              "Use -O3 / /O3 in Release (default is -O2 / /O2)" OFF)
 
 # Standard & build type
 set(CMAKE_C_STANDARD 11)
@@ -31,7 +36,6 @@ set(PROJECT_NAME "${PROJECT_NAME}")
 find_package(Git QUIET)
 
 if(GIT_FOUND)
-  # Prefer annotated tag description; fall back to commit hash if no tags
   execute_process(
     COMMAND ${GIT_EXECUTABLE} describe --tags --long --always --dirty
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -90,10 +94,7 @@ configure_file(
   @ONLY
 )
 
-# Ensure generated headers are visible
 include_directories(${GENERATED_INCLUDE_DIR})
-# Optionally install the generated header
-#install(DIRECTORY ${GENERATED_INCLUDE_DIR}/ DESTINATION include/synth_generated FILES_MATCHING PATTERN "version.h")
 
 # --- Create target ---
 add_executable(synth ${SYNTH_SOURCES})
@@ -111,31 +112,128 @@ set(SDL_TARGET SDL3::SDL3)
 target_include_directories(synth PRIVATE ${CMAKE_SOURCE_DIR}/external/sdl)
 target_link_libraries(synth PRIVATE ${SDL_TARGET})
 
-set(ENABLE_CJSON_TEST            OFF) # CACHE INTERNAL "Disable building cjson tests")
-set(ENABLE_CUSTOM_COMPILER_FLAGS OFF) # CACHE INTERNAL "Disable custom cjson compiler flags")
-set(ENABLE_CJSON_UTILS           OFF) # CACHE INTERNAL "Disable cjson utils")
+set(ENABLE_CJSON_TEST            OFF)
+set(ENABLE_CUSTOM_COMPILER_FLAGS OFF)
+set(ENABLE_CJSON_UTILS           OFF)
 add_subdirectory(${CMAKE_SOURCE_DIR}/external/cjson external/cjson_build)
 target_link_libraries(synth PRIVATE cjson)
 
 
+# ---------------------------------------------------------------------------
 # Compiler flags per-config and per-compiler
+# ---------------------------------------------------------------------------
 target_compile_options(synth PRIVATE
   # MSVC
   $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/W4 /Od /RTC1 /Zi>
-  $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/W4 /O2 /DNDEBUG /Zi>
+  $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/W4 /DNDEBUG /Zi>
   # GNU/Clang
   $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Debug>>:-Wall -Wextra -Wpedantic -O0 -g>
-  $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Release>>:-Wall -Wextra -Wpedantic -O2>
+  $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Release>>:-Wall -Wextra -Wpedantic>
 )
 
-# SSE optional
+# ---------------------------------------------------------------------------
+# Release optimisation level: -O2 (default) or -O3 (opt-in via ENABLE_O3)
+# ---------------------------------------------------------------------------
+if(ENABLE_O3)
+  message(STATUS "[OptLevel] Release: -O3 / /O3 (ENABLE_O3=ON)")
+  target_compile_options(synth PRIVATE
+    $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Release>>:-O3>
+    $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/O3>
+  )
+else()
+  message(STATUS "[OptLevel] Release: -O2 / /O2 (default; set ENABLE_O3=ON for -O3)")
+  target_compile_options(synth PRIVATE
+    $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Release>>:-O2>
+    $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/O2>
+  )
+endif()
+
+# ---------------------------------------------------------------------------
+# Math optimisation flags
+#
+#  Debug:   each flag is individually opt-in via CMake options above.
+#  Release: all flags + SSE2 are forced on unconditionally.
+#
+#  GCC/Clang breakdown:
+#    -ffast-math          implies -fno-math-errno, -ffinite-math-only,
+#                         -fassociative-math and more — use alone OR combine
+#                         the individual flags; mixing is harmless but noisy.
+#    -fno-math-errno      skip setting errno after math calls (safe for audio)
+#    -ffinite-math-only   assume no NaN/Inf inputs/outputs
+#    -fassociative-math   allow reordering of floating-point ops
+#
+#  MSVC equivalents:
+#    /fp:fast             ≈ -ffast-math (covers finite + associative)
+#    /fp:except-          ≈ -fno-math-errno (disable FP exception semantics)
+#    Note: MSVC has no direct /ffinite-math-only or /fassociative-math toggle;
+#          /fp:fast already implies both.
+# ---------------------------------------------------------------------------
+
+# --- Debug: individually toggleable ---
+if(ENABLE_FAST_MATH)
+  message(STATUS "[MathOpt] -ffast-math ON (Debug)")
+  target_compile_options(synth PRIVATE
+    $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Debug>>:-ffast-math>
+    $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/fp:fast /fp:except->
+  )
+endif()
+
+if(ENABLE_NO_MATH_ERRNO)
+  message(STATUS "[MathOpt] -fno-math-errno ON (Debug)")
+  target_compile_options(synth PRIVATE
+    $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Debug>>:-fno-math-errno>
+    $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/fp:except->
+  )
+endif()
+
+if(ENABLE_FINITE_MATH)
+  message(STATUS "[MathOpt] -ffinite-math-only ON (Debug)")
+  target_compile_options(synth PRIVATE
+    $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Debug>>:-ffinite-math-only>
+    # MSVC: /fp:fast already covers this; no separate flag needed
+    $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/fp:fast>
+  )
+endif()
+
+if(ENABLE_ASSOCIATIVE_MATH)
+  message(STATUS "[MathOpt] -fassociative-math ON (Debug)")
+  target_compile_options(synth PRIVATE
+    $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Debug>>:-fassociative-math>
+    # MSVC: /fp:fast already covers this; no separate flag needed
+    $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/fp:fast>
+  )
+endif()
+
+# --- Release: force math flags + SSE2 unconditionally ---
+target_compile_options(synth PRIVATE
+  $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Release>>:
+    -ffast-math
+    -fno-math-errno
+    -ffinite-math-only
+    -fassociative-math
+    -msse2
+  >
+  $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Release>>:
+    /fp:fast
+    /fp:except-
+    /arch:SSE2
+  >
+)
+target_compile_definitions(synth PRIVATE
+  $<$<CONFIG:Release>:ENABLE_SSE=1>
+)
+
+# --- SSE2: manual opt-in for Debug (or any non-Release config) ---
 if(ENABLE_SSE)
+  message(STATUS "[MathOpt] SSE2 ON (manual)")
   target_compile_definitions(synth PRIVATE ENABLE_SSE=1)
   target_compile_options(synth PRIVATE
     $<$<C_COMPILER_ID:GNU,Clang>:-msse2>
     $<$<C_COMPILER_ID:MSVC>:/arch:SSE2>
   )
 endif()
+
+# ---------------------------------------------------------------------------
 
 # Link math lib on Unix-like systems
 if(UNIX)
@@ -148,21 +246,20 @@ if(NOT GLSLC_EXECUTABLE)
   message(FATAL_ERROR "glslc not found (required to compile GLSL -> SPIR-V).")
 endif()
 
-# Shader sources (relative to source tree)
+# Shader sources
 set(SHADER_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 file(GLOB SHADER_SOURCES CONFIGURE_DEPENDS
   ${SHADER_SRC_DIR}/*.vert
   ${SHADER_SRC_DIR}/*.frag
 )
 
-# Output directory for compiled SPIR-V
 set(SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/shaders")
 file(MAKE_DIRECTORY ${SHADER_OUT_DIR})
 
 set(SHADER_OUTS)
 foreach(SRC IN LISTS SHADER_SOURCES)
-  get_filename_component(NAME ${SRC} NAME)             # e.g. color.vert
-  set(OUT ${SHADER_OUT_DIR}/${NAME}.spv)               # e.g. build/shaders/color.vert.spv
+  get_filename_component(NAME ${SRC} NAME)
+  set(OUT ${SHADER_OUT_DIR}/${NAME}.spv)
 
   add_custom_command(
     OUTPUT ${OUT}
@@ -175,25 +272,13 @@ foreach(SRC IN LISTS SHADER_SOURCES)
   list(APPEND SHADER_OUTS ${OUT})
 endforeach()
 
-# Top-level target that builds all shaders
 add_custom_target(shaders ALL DEPENDS ${SHADER_OUTS})
-
-# Ensure synth is built after shaders (so outputs exist for packaging/installation)
 add_dependencies(synth shaders)
 
-# Optionally install compiled shaders
-#install(DIRECTORY ${SHADER_OUT_DIR}/
-#  DESTINATION share/${PROJECT_NAME}/shaders
-#  FILES_MATCHING PATTERN "*.spv"
-#)
-
-# Install binary
 install(TARGETS synth RUNTIME DESTINATION bin)
 
-# Convenience target: clang-format (requires clang-format in PATH)
 add_custom_target(format
   COMMAND clang-format -i ${SYNTH_SOURCES} ${PROJECT_INCLUDE_DIR}/*.h ${GENERATED_INCLUDE_DIR}/*.h
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   COMMENT "Run clang-format on sources and headers"
 )
-

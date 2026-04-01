@@ -1,7 +1,8 @@
 #include "app.h"
 #include "argparse.h"
-#include "audio.h"
 #include "log.h"
+#include "synth.h"
+#include "thread.h"
 #include "ui.h"
 #include "ui_widgets.h"
 #include "version.h"
@@ -172,7 +173,9 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     /* Start on the dark theme */
     ui_set_theme(&UI_THEME_DARK);
 
-    SDL_CreateThread(audio_thread, "audio_thread", NULL);
+    // SDL_CreateThread(audio_thread, "audio_thread", NULL);
+
+    app->synth_thread = thread_create(synth_thread, "synth-thread", NULL);
 
     *appstate = app;
     LOGI("Application startup complete");
@@ -422,6 +425,8 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
     Pm_Terminate();
     if (app->renderer)
         app->renderer->shutdown();
+    if (app->synth_thread)
+        thread_stop(app->synth_thread);
     free(app);
     log_shutdown();
 }

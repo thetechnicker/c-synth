@@ -3,6 +3,7 @@
 
 #include "argparse.h"
 #include "hashmap.h"
+#include "thread.h"
 #include "ui.h"
 #include "ui_widgets.h"
 #include <SDL3/SDL.h>
@@ -27,6 +28,7 @@ typedef struct App {
     PortMidiStream *stream;
     HashMap *config;
     bool buttonstates[SDL_SCANCODE_COUNT];
+    thread_t *synth_thread;
 } App_t;
 
 void create_app_argparse(ArgParse *ap);

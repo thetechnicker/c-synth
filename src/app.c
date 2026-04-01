@@ -124,12 +124,15 @@ static void update_spectrum(float t) {
  * ========================================================= */
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
+    SDL_SetAppMetadata(PROJECT_NAME, PROJECT_GIT_DESCRIBE, "");
     log_init("app.log.jsonl", LOG_DEBUG);
     LOGI("Application is starting up ...");
-
     LOGD("Application data at: %s", SDL_GetBasePath());
     LOGD("Current workdir is: %s", SDL_GetCurrentDirectory());
-    //SDL_SetAppMetadata(PROJECT_NAME, PROJECT_GIT_DESCRIBE, const char *appidentifier);
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
+        LOGE("Couldn't initialize SDL: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
 
     ArgParse *ap = malloc(sizeof(ArgParse));
     CHECK_ERR_SDL(argparse_init(ap, "C-Synth", NULL, NULL, 0));

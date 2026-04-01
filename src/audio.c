@@ -1,7 +1,7 @@
 #include "audio.h"
 #include "log.h"
-#include <SDL3/SDL_audio.h>
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_audio.h>
 
 static void print_audio_devices(const char *label, SDL_AudioDeviceID *devices, int count) {
     printf("%s devices (%i):\n", label, count);
@@ -15,10 +15,7 @@ static void print_audio_devices(const char *label, SDL_AudioDeviceID *devices, i
     }
 }
 
-int audio_thread(void *data) {
-    (void)data;
-    SDL
-
+static void print_audio_setup(void) {
     // --- Drivers ---
     int num_audio = SDL_GetNumAudioDrivers();
     printf("Number of audio drivers: %i\n", num_audio);
@@ -49,6 +46,17 @@ int audio_thread(void *data) {
         print_audio_devices("Recording", recording, recording_count);
         SDL_free(recording);
     }
+    SDL_AudioDeviceID sdl_audio_device_default_playback = SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+    SDL_AudioDeviceID sdl_audio_device_default_recording = SDL_AUDIO_DEVICE_DEFAULT_RECORDING;
+    print_audio_devices("Default Playback", &sdl_audio_device_default_playback, 1);
+    print_audio_devices("Default Recording", &sdl_audio_device_default_recording, 1);
+}
 
+int audio_thread(void *data) {
+    (void)data;
+    print_audio_setup();
+
+    while (1) {
+    }
     return 0;
 }

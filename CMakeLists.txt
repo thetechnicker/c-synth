@@ -1,16 +1,18 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.26)
+#cmake_policy(VERSION 3.26) 
+#cmake_policy(SET CMP0077 NEW)
 # Export compile_commands.json (useful for clangd)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 project(synth C)
 
 # Options
-option(ENABLE_SSE             "Enable SSE2 optimizations"                    OFF)
-option(ENABLE_FAST_MATH       "Enable -ffast-math / /fp:fast"                OFF)
-option(ENABLE_NO_MATH_ERRNO   "Enable -fno-math-errno / /fp:except-"         OFF)
-option(ENABLE_FINITE_MATH     "Enable -ffinite-math-only"                    OFF)
-option(ENABLE_ASSOCIATIVE_MATH "Enable -fassociative-math"                  OFF)
-option(ENABLE_O3              "Use -O3 / /O3 in Release (default is -O2 / /O2)" OFF)
+#option(ENABLE_SSE             "Enable SSE2 optimizations"                    OFF)
+#option(ENABLE_FAST_MATH       "Enable -ffast-math / /fp:fast"                OFF)
+#option(ENABLE_NO_MATH_ERRNO   "Enable -fno-math-errno / /fp:except-"         OFF)
+#option(ENABLE_FINITE_MATH     "Enable -ffinite-math-only"                    OFF)
+#option(ENABLE_ASSOCIATIVE_MATH "Enable -fassociative-math"                  OFF)
+#option(ENABLE_O3              "Use -O3 / /O3 in Release (default is -O2 / /O2)" OFF)
 
 # Standard & build type
 set(CMAKE_C_STANDARD 11)
@@ -102,21 +104,28 @@ target_include_directories(synth PRIVATE ${PROJECT_INCLUDE_DIR} ${GENERATED_INCL
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libs" FORCE)
 
+message(STATUS "[PortMIDI]")
 add_subdirectory(${CMAKE_SOURCE_DIR}/external/portmidi external/portmidi_build)
 set(PORTMIDI_TARGET portmidi)
 target_include_directories(synth PRIVATE ${CMAKE_SOURCE_DIR}/external/portmidi)
 target_link_libraries(synth PRIVATE ${PORTMIDI_TARGET})
+message(STATUS "[----------------]\n")
 
+message(STATUS "[SDL3]")
 add_subdirectory(${CMAKE_SOURCE_DIR}/external/sdl external/sdl_build)
 set(SDL_TARGET SDL3::SDL3)
 target_include_directories(synth PRIVATE ${CMAKE_SOURCE_DIR}/external/sdl)
 target_link_libraries(synth PRIVATE ${SDL_TARGET})
+message(STATUS "[----------------]\n")
 
+message(STATUS "[cJSON]")
 set(ENABLE_CJSON_TEST            OFF)
 set(ENABLE_CUSTOM_COMPILER_FLAGS OFF)
 set(ENABLE_CJSON_UTILS           OFF)
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 add_subdirectory(${CMAKE_SOURCE_DIR}/external/cjson external/cjson_build)
 target_link_libraries(synth PRIVATE cjson)
+message(STATUS "[----------------]\n")
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +146,17 @@ target_compile_options(synth PRIVATE
 if(ENABLE_O3)
   message(STATUS "[OptLevel] Release: -O3 / /O3 (ENABLE_O3=ON)")
   target_compile_options(synth PRIVATE
-    $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Release>>:-O3>
+    $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Release>>:
+      -O3
+      -march=native
+      -ftree-vectorize
+      -ffast-math
+      -fno-math-errno
+      -funsafe-math-optimizations
+      -mavx2
+      #-lmvec
+      #-fopt-info-vec-optimized#=vec.txt
+    >
     $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/O3>
   )
 else()
@@ -170,75 +189,81 @@ endif()
 # ---------------------------------------------------------------------------
 
 # --- Debug: individually toggleable ---
-if(ENABLE_FAST_MATH)
-  message(STATUS "[MathOpt] -ffast-math ON (Debug)")
-  target_compile_options(synth PRIVATE
-    $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Debug>>:-ffast-math>
-    $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/fp:fast /fp:except->
-  )
-endif()
-
-if(ENABLE_NO_MATH_ERRNO)
-  message(STATUS "[MathOpt] -fno-math-errno ON (Debug)")
-  target_compile_options(synth PRIVATE
-    $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Debug>>:-fno-math-errno>
-    $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/fp:except->
-  )
-endif()
-
-if(ENABLE_FINITE_MATH)
-  message(STATUS "[MathOpt] -ffinite-math-only ON (Debug)")
-  target_compile_options(synth PRIVATE
-    $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Debug>>:-ffinite-math-only>
-    # MSVC: /fp:fast already covers this; no separate flag needed
-    $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/fp:fast>
-  )
-endif()
-
-if(ENABLE_ASSOCIATIVE_MATH)
-  message(STATUS "[MathOpt] -fassociative-math ON (Debug)")
-  target_compile_options(synth PRIVATE
-    $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Debug>>:-fassociative-math>
-    # MSVC: /fp:fast already covers this; no separate flag needed
-    $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/fp:fast>
-  )
-endif()
-
-# --- Release: force math flags + SSE2 unconditionally ---
-target_compile_options(synth PRIVATE
-  $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Release>>:
-    -ffast-math
-    -fno-math-errno
-    -ffinite-math-only
-    -fassociative-math
-    -msse2
-  >
-  $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Release>>:
-    /fp:fast
-    /fp:except-
-    /arch:SSE2
-  >
-)
-target_compile_definitions(synth PRIVATE
-  $<$<CONFIG:Release>:ENABLE_SSE=1>
-)
-
-# --- SSE2: manual opt-in for Debug (or any non-Release config) ---
-if(ENABLE_SSE)
-  message(STATUS "[MathOpt] SSE2 ON (manual)")
-  target_compile_definitions(synth PRIVATE ENABLE_SSE=1)
-  target_compile_options(synth PRIVATE
-    $<$<C_COMPILER_ID:GNU,Clang>:-msse2>
-    $<$<C_COMPILER_ID:MSVC>:/arch:SSE2>
-  )
-endif()
+#if(ENABLE_FAST_MATH)
+#  message(STATUS "[MathOpt] -ffast-math ON (Debug)")
+#  target_compile_options(synth PRIVATE
+#    $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Debug>>:-ffast-math>
+#    $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/fp:fast /fp:except->
+#  )
+#endif()
+#
+#if(ENABLE_NO_MATH_ERRNO)
+#  message(STATUS "[MathOpt] -fno-math-errno ON (Debug)")
+#  target_compile_options(synth PRIVATE
+#    $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Debug>>:-fno-math-errno>
+#    $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/fp:except->
+#  )
+#endif()
+#
+#if(ENABLE_FINITE_MATH)
+#  message(STATUS "[MathOpt] -ffinite-math-only ON (Debug)")
+#  target_compile_options(synth PRIVATE
+#    $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Debug>>:-ffinite-math-only>
+#    # MSVC: /fp:fast already covers this; no separate flag needed
+#    $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/fp:fast>
+#  )
+#endif()
+#
+#if(ENABLE_ASSOCIATIVE_MATH)
+#  message(STATUS "[MathOpt] -fassociative-math ON (Debug)")
+#  target_compile_options(synth PRIVATE
+#    $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Debug>>:-fassociative-math>
+#    # MSVC: /fp:fast already covers this; no separate flag needed
+#    $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/fp:fast>
+#  )
+#endif()
+#
+## --- Release: force math flags + SSE2 unconditionally ---
+#target_compile_options(synth PRIVATE
+#  $<$<AND:$<C_COMPILER_ID:GNU,Clang>,$<CONFIG:Release>>:
+#    -ffast-math
+#    -fno-math-errno
+#    -ffinite-math-only
+#    -fassociative-math
+#    -msse2
+#  >
+#  $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Release>>:
+#    /fp:fast
+#    /fp:except-
+#    /arch:SSE2
+#  >
+#)
+#target_compile_definitions(synth PRIVATE
+#  $<$<CONFIG:Release>:ENABLE_SSE=1>
+#)
+#
+## --- SSE2: manual opt-in for Debug (or any non-Release config) ---
+#if(ENABLE_SSE)
+#  message(STATUS "[MathOpt] SSE2 ON (manual)")
+#  target_compile_definitions(synth PRIVATE ENABLE_SSE=1)
+#  target_compile_options(synth PRIVATE
+#    $<$<C_COMPILER_ID:GNU,Clang>:-msse2>
+#    $<$<C_COMPILER_ID:MSVC>:/arch:SSE2>
+#  )
+#endif()
+#
+#target_compile_options(synth PRIVATE
+#  $<$<C_COMPILER_ID:GNU,Clang>:-ftree-loop-vectorize>
+#  # MSVC: /fp:fast already covers this; no separate flag needed
+#  $<$<C_COMPILER_ID:MSVC>:/fp:tree-loop-vectorize>
+#)
 
 # ---------------------------------------------------------------------------
 
 # Link math lib on Unix-like systems
-if(UNIX)
-  target_link_libraries(synth PRIVATE m)
-endif()
+#target_link_libraries(synth PRIVATE
+#  $<$<AND:$<C_COMPILER_ID:GNU>,$<CONFIG:Release>>:mvec>
+#)
 
 # Find glslc
 find_program(GLSLC_EXECUTABLE glslc D:/c_cpp_dependencies/shaderc/build/glslc/Release/)

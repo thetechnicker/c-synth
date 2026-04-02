@@ -2,6 +2,7 @@
 #define SYNTH_H
 
 #include <SDL3/SDL_audio.h>
+#include <SDL3/SDL_mutex.h>
 #include <SDL3/SDL_thread.h>
 
 #define SR 48000
@@ -14,7 +15,6 @@ typedef struct {
     float amp;
     float sr;
 } Osc;
-
 
 int synth_thread(void *data);
 

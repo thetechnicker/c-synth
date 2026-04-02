@@ -12,16 +12,7 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-#define SR 48000
-#define CH 2
-#define BLOCK 256 // process in blocks for better vectorization
-
-typedef struct {
-    float phase;
-    float freq;
-    float amp;
-    float sr;
-} Osc;
+static Osc osc;
 
 static void print_audio_devices(const char *label, SDL_AudioDeviceID *devices, int count) {
     printf("%s devices (%i):\n", label, count);
@@ -96,12 +87,38 @@ static void fill_sine_block(Osc *o, float *__restrict buf, int frames) {
     o->phase = phase;
 }
 
+void SDLCALL synth_callback(void *userdata, SDL_AudioStream *stream, int additional_amount,
+                            int total_amount) {
+    (void)userdata;
+    (void)total_amount;
+    int frames = additional_amount > 0 ? additional_amount : BLOCK;
+    size_t samples = (size_t)frames * CH;
+    size_t bytes = samples * sizeof(float);
+
+    float *block = (float *)calloc(samples, sizeof(float));
+    if (!block) {
+        LOGE("calloc failed for audio block (%zu bytes)", bytes);
+        return;
+    }
+
+    fill_sine_block(&osc, block, frames);
+
+    /* SDL_PutAudioStreamData returns the number of bytes written on success,
+       or a negative SDL error code; we ignore it here but you may want to check. */
+    if (SDL_PutAudioStreamData(stream, block, (int)bytes)) {
+        LOGE("SDL_PutAudioStreamData failed: %s", SDL_GetError());
+    }
+
+    free(block);
+}
+
 int synth_thread(void *data) {
     thread_t *this = data;
     print_audio_setup();
 
+    osc_init(&osc, 220.0f, 0.2f, (float)SR);
     SDL_AudioStream *stream =
-        SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, NULL, NULL, NULL);
+        SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, NULL, synth_callback, NULL);
     if (!stream) {
         LOGE("Failed to open Audio Stream");
         return 1;
@@ -110,24 +127,12 @@ int synth_thread(void *data) {
     SDL_ResumeAudioStreamDevice(stream);
     LOGD("Audio Stream Started");
 
-    Osc osc;
-    osc_init(&osc, 220.0f, 0.2f, (float)SR);
-
-    const int frames_per_block = BLOCK;
-    float *block = (float *)malloc(sizeof(float) * frames_per_block * CH);
-    if (!block)
-        return 1;
-
-    // Play for ~5 seconds as example (you can use your running flag instead)
-    // int total_frames = SR * 5;
     while (SDL_GetAtomicInt(&this->running) != 0) {
-        fill_sine_block(&osc, block, BLOCK);
-        int bytes = BLOCK * CH * sizeof(float);
-        SDL_PutAudioStreamData(stream, block, bytes);
+        SDL_Delay(10);
     }
 
     LOGD("Audio Stream Ended");
-    free(block);
+    // free(block);
     SDL_DestroyAudioStream(stream);
     return 0;
 }

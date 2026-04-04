@@ -273,6 +273,7 @@ endif()
 #                    in most distros; linking libmvec would likely be a no-op.
 #   Windows + MSVC → SVML ships inside the MSVC toolchain and is activated
 #                    implicitly by /Qvec + /fp:fast; no separate lib needed.
+#   Windows + non-MSVC → try SLEEF; else Intel SVML/MKL; else AMD AOCL
 # ---------------------------------------------------------------------------
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
@@ -295,10 +296,132 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     if(CMAKE_C_COMPILER_ID STREQUAL "MSVC")
-        # SVML is implicit — nothing to link explicitly.
         message(STATUS "[MathLib] Windows + MSVC: SVML activated via /Qvec + /fp:fast (implicit)")
-    endif()
-endif()
+        target_compile_definitions(synth PRIVATE USE_SVML)
+    else()
+        message(STATUS "[MathLib] Windows + non-MSVC: try SLEEF, then Intel SVML/MKL, then AMD AOCL")
+
+        # 1) Try SLEEF
+        set(SLEEF_DIR "" CACHE PATH "Path to SLEEF install (Windows)")
+        find_package(sleef QUIET)
+
+        if(NOT sleef_FOUND)
+            if(SLEEF_DIR)
+                set(CMAKE_PREFIX_PATH "${SLEEF_DIR};${CMAKE_PREFIX_PATH}")
+                find_package(sleef QUIET)
+            elseif(DEFINED ENV{SLEEF_ROOT})
+                set(CMAKE_PREFIX_PATH "$ENV{SLEEF_ROOT};${CMAKE_PREFIX_PATH}")
+                find_package(sleef QUIET)
+            endif()
+        endif()
+
+        if(sleef_FOUND)
+            message(STATUS "Using SLEEF (Windows)")
+            if(TARGET SLEEF::sleef)
+                target_link_libraries(synth PRIVATE SLEEF::sleef)
+            else()
+                if(TARGET sleef)
+                    target_link_libraries(synth PRIVATE sleef)
+                else()
+                    if(DEFINED sleef_LIBRARIES)
+                        target_link_libraries(synth PRIVATE ${sleef_LIBRARIES})
+                    endif()
+                    if(DEFINED sleef_INCLUDE_DIRS)
+                        target_include_directories(synth PRIVATE ${sleef_INCLUDE_DIRS})
+                    endif()
+                endif()
+            endif()
+            target_compile_definitions(synth PRIVATE USE_SLEEF)
+        else()
+            message(STATUS "SLEEF not found; probing for Intel compiler or MKL")
+
+            # 2) Detect Intel compilers (IFX/ICC/ICX)
+            if(CMAKE_C_COMPILER_ID MATCHES "Intel" OR CMAKE_C_COMPILER_ID MATCHES "IntelLLVM")
+                message(STATUS "Intel compiler detected (${CMAKE_C_COMPILER_ID}); enabling SVML usage flags")
+                target_compile_options(synth PRIVATE
+                    $<$<OR:$<C_COMPILER_ID:Intel>,$<C_COMPILER_ID:IntelLLVM>>:
+                        -qsvml>
+                )
+                target_compile_definitions(synth PRIVATE USE_SVML)
+            else()
+                # 3) Try Intel MKL via find_package or MKLROOT
+                find_package(MKL QUIET)
+                if(MKL_FOUND)
+                    message(STATUS "Found Intel MKL; linking MKL")
+                    if(TARGET MKL::MKL)
+                        target_link_libraries(synth PRIVATE MKL::MKL)
+                    else()
+                        target_link_libraries(synth PRIVATE ${MKL_LIBRARIES})
+                        target_include_directories(synth PRIVATE ${MKL_INCLUDE_DIRS})
+                    endif()
+                    target_compile_definitions(synth PRIVATE USE_MKL)
+                else()
+                    # 4) Check for AMD AOCL (AOCL-CPU / aocl-libm) if AMD CPU/toolchain
+                    #    Detect AMD via CMAKE_HOST_SYSTEM_PROCESSOR or /proc/cpuinfo (best-effort).
+                    message(STATUS "MKL not found; probing for AMD AOCL")
+
+                    set(IS_AMD_CPU FALSE)
+                    if(DEFINED CMAKE_HOST_SYSTEM_PROCESSOR)
+                        string(TOLOWER "${CMAKE_HOST_SYSTEM_PROCESSOR}" _proc_lower)
+                        if(_proc_lower MATCHES "amd" OR _proc_lower MATCHES "x86_64" OR _proc_lower MATCHES "amd64")
+                            # x86_64 doesn't guarantee AMD, but we'll also check /proc/cpuinfo on systems that have it
+                            set(IS_AMD_CPU TRUE)
+                        endif()
+                    endif()
+
+                    if(EXISTS "/proc/cpuinfo")
+                        file(READ "/proc/cpuinfo" _cpuinfo)
+                        string(TOLOWER "${_cpuinfo}" _cpuinfo_lower)
+                        if(_cpuinfo_lower MATCHES "authenticamd" OR _cpuinfo_lower MATCHES "amd")
+                            set(IS_AMD_CPU TRUE)
+                        endif()
+                    endif()
+
+                    if(IS_AMD_CPU)
+                        message(STATUS "AMD CPU detected (best-effort); trying to find AOCL / AMD libm / BLAS")
+                        # Prefer CMake configs if present
+                        find_package(AOCL QUIET) # hypothetical; many AOCL installs may not provide CMake package
+                        if(AOCL_FOUND)
+                            message(STATUS "Found AOCL via find_package(AOCL); linking")
+                            if(TARGET AOCL::AOCL)
+                                target_link_libraries(synth PRIVATE AOCL::AOCL)
+                            else()
+                                target_link_libraries(synth PRIVATE ${AOCL_LIBRARIES})
+                                target_include_directories(synth PRIVATE ${AOCL_INCLUDE_DIRS})
+                            endif()
+                            target_compile_definitions(synth PRIVATE USE_AOCL)
+                        else()
+                            # Fallback: check AMD environment var AOCLROOT or common install paths
+                            if(DEFINED ENV{AOCLROOT})
+                                set(_AOCL_ROOT $ENV{AOCLROOT})
+                            elseif(DEFINED ENV{AMD_AOCL_ROOT})
+                                set(_AOCL_ROOT $ENV{AMD_AOCL_ROOT})
+                            else()
+                                set(_AOCL_ROOT "")
+                            endif()
+
+                            if(_AOCL_ROOT)
+                                find_library(AOCL_LIBM aocl_libm HINTS "${_AOCL_ROOT}/lib" "${_AOCL_ROOT}/lib/x86_64")
+                                find_library(AOCL_BLIS blis HINTS "${_AOCL_ROOT}/lib" "${_AOCL_ROOT}/lib/x86_64")
+                                if(AOCL_LIBM)
+                                    message(STATUS "Found AMD libm: ${AOCL_LIBM}; linking it")
+                                    target_link_libraries(synth PRIVATE ${AOCL_LIBM})
+                                    target_compile_definitions(synth PRIVATE USE_AOCL)
+                                else()
+                                    message(WARNING "AMD AOCL libm not found under AOCLROOT; skipping AOCL")
+                                endif()
+                            else()
+                                message(WARNING "No AOCL/MKL/SLEEF found and AMD toolchain/root not set; continuing without vectorised math")
+                            endif()
+                        endif()
+                    else()
+                        message(WARNING "No SLEEF, Intel MKL, or AMD AOCL detected; continuing without vectorised math")
+                    endif() # IS_AMD_CPU
+                endif() # MKL_FOUND
+            endif() # Intel compiler check
+        endif() # SLEEF_FOUND
+    endif() # MSVC check
+endif() # Windows vs Linux
 
 # ---------------------------------------------------------------------------
 # GLSL → SPIR-V shader compilation

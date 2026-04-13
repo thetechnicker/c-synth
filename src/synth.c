@@ -9,6 +9,7 @@
 #include <SDL3/SDL_audio.h>
 #include <math.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -20,22 +21,10 @@
  * Globals
  * ═════════════════════════════════════════════════════════════════════════ */
 
-/* Atomic pipeline pointer — RT thread reads, manager thread writes. */
 _Atomic(Pipeline *) g_pipeline = NULL;
 
-/*
- * MIDI ring: manager thread pushes, RT callback pops.
- * Patch-command ring: main thread pushes, manager thread pops.
- */
 static SpscRing s_midi_ring;
-static SpscRing s_patch_ring; /* reuses PmhMidiEvent slot via PatchCmd cast — see below */
 
-/*
- * We need a second SPSC ring for PatchCmd (main → manager).
- * PatchCmd is smaller than PmhMidiEvent so we can safely reuse SpscRing's
- * buf storage by casting.  A cleaner project would template the ring or
- * define a union; for now a dedicated ring avoids that complexity.
- */
 typedef struct {
     PatchCmd buf[SPSC_CAPACITY];
     _Alignas(64) atomic_uint head;
@@ -67,53 +56,140 @@ static inline int patch_ring_pop(PatchCmdRing *r, PatchCmd *out) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
- * Pipeline construction / destruction
+ * DSP helpers
  * ═════════════════════════════════════════════════════════════════════════ */
 
 static inline float lp_coeff(float cutoff_hz, float sr) {
-    /* Bilinear approximation: a = 2πfc/sr (clamped to [0,1]) */
     float a = (2.0f * (float)M_PI * cutoff_hz) / sr;
     return a < 0.0f ? 0.0f : (a > 1.0f ? 1.0f : a);
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Voice allocation  (RT-safe: no malloc, no locks, no I/O)
+ * ═════════════════════════════════════════════════════════════════════════ */
+
 /*
- * Allocate and fully initialise a new pipeline.
- * Called from the manager thread — may block, allocate, do anything.
+ * Monotonically increasing counter stamped on every note-on.
+ * Written only from the RT callback, so no atomic needed — the RT thread
+ * is the sole writer and reader.
  */
-static Pipeline *pipeline_build(float osc_freq, float osc_amp, float cutoff_hz) {
+static uint32_t s_voice_age = 0;
+
+/*
+ * Fully initialise a voice slot for a new note.
+ * Resets phase and filter state to avoid clicks when stealing.
+ */
+static inline void voice_init(Voice *v, uint8_t note, float vel_norm, float cutoff_hz,
+                              float amp_scale) {
+    v->osc.phase = 0.0f;
+    v->osc.freq = 440.0f * dsp_powf(2.0f, ((float)note - 69.0f) / 12.0f);
+    v->osc.amp = vel_norm * amp_scale;
+    v->osc.sr = (float)SR;
+
+    v->filter.cutoff_target = cutoff_hz;
+    v->filter.cutoff_hz = cutoff_hz;
+    v->filter.a = lp_coeff(cutoff_hz, (float)SR);
+    v->filter.z = 0.0f;
+    /* ~5 ms smoother so cutoff changes don't produce zipper noise. */
+    v->filter.cutoff_smooth = lp_coeff(1.0f / 0.005f, (float)SR);
+
+    v->note = note;
+    v->velocity = vel_norm;
+    v->age = ++s_voice_age;
+    v->active = true;
+}
+
+/*
+ * Find a free voice or steal the one with the lowest velocity (softest note).
+ *
+ * Priority order:
+ *   1. Re-trigger an already-playing instance of the same note (avoids
+ *      accumulating duplicate voices for repeated keys).
+ *   2. First inactive slot.
+ *   3. Active voice with the lowest velocity.
+ */
+static Voice *voice_allocate(Pipeline *pipe, uint8_t note, float vel_norm, float cutoff_hz,
+                             float amp_scale) {
+    Voice *steal = NULL;
+
+    for (int i = 0; i < NUM_VOICES; ++i) {
+        Voice *v = &pipe->voices[i];
+
+        if (v->active && v->note == note) {
+            /* Re-trigger same note. */
+            voice_init(v, note, vel_norm, cutoff_hz, amp_scale);
+            return v;
+        }
+        if (!v->active) {
+            voice_init(v, note, vel_norm, cutoff_hz, amp_scale);
+            return v;
+        }
+        /* Track softest active voice for stealing. */
+        if (!steal || v->velocity < steal->velocity)
+            steal = v;
+    }
+
+    /* All voices busy — steal the softest. */
+    voice_init(steal, note, vel_norm, cutoff_hz, amp_scale);
+    return steal;
+}
+
+/*
+ * Release the active voice holding the given MIDI note number.
+ * Simply marks it inactive; amplitude ramp-down (envelope) can be
+ * added here later without touching the allocator.
+ */
+static void voice_release(Pipeline *pipe, uint8_t note) {
+    for (int i = 0; i < NUM_VOICES; ++i) {
+        Voice *v = &pipe->voices[i];
+        if (v->active && v->note == note) {
+            v->active = false;
+            v->osc.amp = 0.0f;
+            return;
+        }
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Pipeline construction / destruction
+ * ═════════════════════════════════════════════════════════════════════════ */
+
+/*
+ * Allocate and initialise a silent pipeline.
+ * All voices start inactive; filter defaults are pre-loaded so the first
+ * note-on sounds correct even before any CC messages have arrived.
+ */
+static Pipeline *pipeline_build(float default_freq, float default_amp, float cutoff_hz) {
+    (void)default_amp; /* applied by voice_init on first note-on */
+
     Pipeline *p = (Pipeline *)malloc(sizeof(Pipeline));
     if (!p)
         return NULL;
     memset(p, 0, sizeof(Pipeline));
 
-    /* Oscillator */
-    p->osc.phase = 0.0f;
-    p->osc.freq = osc_freq;
-    p->osc.amp = osc_amp;
-    p->osc.sr = (float)SR;
-
-    /* One-pole lowpass */
-    p->filter.cutoff_target = cutoff_hz;
-    p->filter.cutoff_hz = cutoff_hz;
-    p->filter.a = lp_coeff(cutoff_hz, (float)SR);
-    p->filter.z = 0.0f;
-    /* Smoother time-constant ~5 ms so cutoff changes don't zipper */
-    p->filter.cutoff_smooth = lp_coeff(1.0f / 0.005f, (float)SR);
-
+    for (int i = 0; i < NUM_VOICES; ++i) {
+        Voice *v = &p->voices[i];
+        v->active = false;
+        v->osc.sr = (float)SR;
+        v->osc.freq = default_freq;
+        v->osc.amp = 0.0f;
+        v->filter.cutoff_target = cutoff_hz;
+        v->filter.cutoff_hz = cutoff_hz;
+        v->filter.a = lp_coeff(cutoff_hz, (float)SR);
+        v->filter.cutoff_smooth = lp_coeff(1.0f / 0.005f, (float)SR);
+    }
     return p;
 }
 
 static void pipeline_free(Pipeline *p) { free(p); }
 
 /*
- * Publish a new pipeline atomically and free the old one after a grace period.
- * Called from the manager thread.
+ * Atomically publish a new pipeline and free the old one after a grace period
+ * long enough for the RT thread to finish any block started with the old ptr.
  */
 static void pipeline_swap(Pipeline *new_pipe) {
     Pipeline *old = atomic_exchange_explicit(&g_pipeline, new_pipe, memory_order_acq_rel);
     if (old) {
-        /* Wait long enough for the RT thread to finish any block it started
-         * with the old pointer.  Two block-lengths is conservative. */
         SDL_Delay(PIPELINE_GRACE_MS);
         pipeline_free(old);
     }
@@ -130,6 +206,13 @@ static void pipeline_swap(Pipeline *new_pipe) {
  *   • No sleep / SDL_Delay
  * ═════════════════════════════════════════════════════════════════════════ */
 
+/*
+ * Fixed headroom scale applied to the summed mix.
+ * Prevents clipping when all NUM_VOICES sound at full amplitude.
+ * A soft-knee limiter or RMS compressor can replace this later.
+ */
+#define MIX_SCALE (1.0f / (float)NUM_VOICES)
+
 void SDLCALL synth_callback(void *userdata, SDL_AudioStream *stream, int additional_amount,
                             int total_amount) {
     LOGD("%d/%d", additional_amount, total_amount);
@@ -137,78 +220,99 @@ void SDLCALL synth_callback(void *userdata, SDL_AudioStream *stream, int additio
     (void)additional_amount;
     (void)total_amount;
 
-    /* 1. Acquire the current pipeline — invisible if manager is rebuilding. */
+    /* 1. Acquire the current pipeline. */
     Pipeline *pipe = atomic_load_explicit(&g_pipeline, memory_order_acquire);
     if (!pipe) {
-        /* No pipeline yet: output silence. */
-        float silence[BLOCK * CH];
+        float silence[additional_amount * CH];
         memset(silence, 0, sizeof(silence));
         SDL_PutAudioStreamData(stream, silence, (int)sizeof(silence));
         return;
     }
 
-    /* 2. Drain any pending MIDI events and apply them to the pipeline. */
+    /* 2. Drain all pending MIDI events and update voice state. */
     PmhMidiEvent ev;
-    if (spsc_pop(&s_midi_ring, &ev)) {
+    while (spsc_pop(&s_midi_ring, &ev)) {
         uint8_t type = ev.raw.msg.status.type;
 
         if (type == MIDI_NOTE_ON) {
             if (ev.velocity == 0) {
-                pipe->osc.amp = 0.0f; /* note-on vel 0 = note off */
+                /* Note-on with velocity 0 is equivalent to note-off. */
+                voice_release(pipe, ev.note);
             } else {
-                /* note → frequency: A4 = 440 Hz at MIDI note 69 */
-                pipe->osc.freq = 440.0f * dsp_powf(2.0f, ((float)ev.note - 69.0f) / 12.0f);
-                pipe->osc.amp = ((float)ev.velocity / 127.0f) * 0.6f;
+                float vel_norm = (float)ev.velocity / 127.0f;
+                /* Use the mod-wheel cutoff target already set on voice 0
+                 * as the initial cutoff for the new voice. */
+                float cutoff = pipe->voices[0].filter.cutoff_target;
+                voice_allocate(pipe, ev.note, vel_norm, cutoff, 0.6f);
             }
         } else if (type == MIDI_NOTE_OFF) {
-            pipe->osc.amp = 0.0f;
+            voice_release(pipe, ev.note);
         } else if (type == MIDI_CONTROL_CHANGE) {
             if (ev.cc_number == 1) {
-                /* Mod wheel → filter cutoff: 200 Hz – 8000 Hz */
-                pipe->filter.cutoff_target = 200.0f + ((float)ev.cc_value / 127.0f) * 7800.0f;
+                /* Mod wheel → filter cutoff on all voices (200–8000 Hz). */
+                float ct = 200.0f + ((float)ev.cc_value / 127.0f) * 7800.0f;
+                for (int i = 0; i < NUM_VOICES; ++i)
+                    pipe->voices[i].filter.cutoff_target = ct;
             } else if (ev.cc_number == 7) {
-                /* CC7 volume */
-                pipe->osc.amp = (float)ev.cc_value / 127.0f * 0.8f;
+                /* CC7 volume → rescale amplitude on all active voices. */
+                float gain = (float)ev.cc_value / 127.0f * 0.8f;
+                for (int i = 0; i < NUM_VOICES; ++i)
+                    if (pipe->voices[i].active)
+                        pipe->voices[i].osc.amp = gain;
             }
         }
     }
 
-    /* 3. Render BLOCK stereo frames into pipe->block. */
+    /* 3. Render: accumulate all active voices into the mix buffer. */
     float *buf = pipe->block;
-    float phase = pipe->osc.phase;
-    float freq = pipe->osc.freq;
-    float amp = pipe->osc.amp;
-    float sr = pipe->osc.sr;
-    float lp_a = pipe->filter.a;
-    float lp_z = pipe->filter.z;
-    float lp_ct = pipe->filter.cutoff_hz;
-    float lp_tgt = pipe->filter.cutoff_target;
-    float lp_sm = pipe->filter.cutoff_smooth;
+    memset(buf, 0, BLOCK * CH * sizeof(float));
 
-    for (int i = 0; i < BLOCK; ++i) {
-        /* 3a. Smooth the filter cutoff to prevent zipper noise. */
-        lp_ct += lp_sm * (lp_tgt - lp_ct);
-        lp_a = lp_coeff(lp_ct, sr);
+    // int render_amount = additional_amount < BLOCK ? additional_amount : BLOCK;
+    for (int vi = 0; vi < NUM_VOICES; ++vi) {
+        Voice *v = &pipe->voices[vi];
+        if (!v->active)
+            continue;
 
-        /* 3b. Oscillator — sine via dspmath fast path. */
-        float s = amp * dsp_sinf(2.0f * (float)M_PI * phase);
-        phase += freq / sr;
-        if (phase >= 1.0f)
-            phase -= 1.0f;
+        /* Load DSP state into locals for the inner loop. */
+        float phase = v->osc.phase;
+        float freq = v->osc.freq;
+        float amp = v->osc.amp;
+        float sr = v->osc.sr;
+        float lp_a = v->filter.a;
+        float lp_z = v->filter.z;
+        float lp_ct = v->filter.cutoff_hz;
+        float lp_tgt = v->filter.cutoff_target;
+        float lp_sm = v->filter.cutoff_smooth;
 
-        /* 3c. One-pole lowpass. */
-        // lp_z = lp_a * s + (1.0f - lp_a) * lp_z;
-        lp_z = s;
+        for (int i = 0; i < BLOCK; ++i) {
+            /* 3a. Smooth filter cutoff to prevent zipper noise. */
+            lp_ct += lp_sm * (lp_tgt - lp_ct);
+            lp_a = lp_coeff(lp_ct, sr);
 
-        buf[2 * i + 0] = lp_z; /* L */
-        buf[2 * i + 1] = lp_z; /* R */
+            /* 3b. Sine oscillator. */
+            float s = amp * dsp_sinf(2.0f * (float)M_PI * phase);
+            phase += freq / sr;
+            if (phase >= 1.0f)
+                phase -= 1.0f;
+
+            /* 3c. One-pole lowpass. */
+            lp_z = lp_a * s + (1.0f - lp_a) * lp_z;
+
+            /* Accumulate into stereo mix buffer. */
+            buf[2 * i + 0] += lp_z; /* L */
+            buf[2 * i + 1] += lp_z; /* R */
+        }
+
+        /* Write back DSP state for next block. */
+        v->osc.phase = phase;
+        v->filter.z = lp_z;
+        v->filter.cutoff_hz = lp_ct;
+        v->filter.a = lp_a;
     }
 
-    /* Write back DSP state. */
-    pipe->osc.phase = phase;
-    pipe->filter.z = lp_z;
-    pipe->filter.cutoff_hz = lp_ct;
-    pipe->filter.a = lp_a;
+    /* 4. Apply headroom scale to the final mix. */
+    for (int i = 0; i < BLOCK * CH; ++i)
+        buf[i] *= MIX_SCALE;
 
     SDL_PutAudioStreamData(stream, buf, BLOCK * CH * (int)sizeof(float));
 }
@@ -218,22 +322,17 @@ void SDLCALL synth_callback(void *userdata, SDL_AudioStream *stream, int additio
  *
  * Responsibilities:
  *   • Poll MIDI and push events to the RT SPSC ring.
- *   • Drain patch-change commands from the main thread and rebuild the
- *     pipeline when needed (MIDI polling pauses during rebuild — that's OK).
- *
- * Timing: SDL_Delay(1) gives ~1 ms MIDI poll cadence, which is imperceptible.
+ *   • Drain patch-change commands and rebuild the pipeline when needed.
  * ═════════════════════════════════════════════════════════════════════════ */
 
 typedef struct {
-    thread_t *parent; /* the synth_thread handle for running check */
+    thread_t *parent;
     SDL_Thread *sdl_thread;
     SDL_AtomicInt running;
 } ManagerCtx;
 
 static PmhInputStream s_pm_in = {0};
 
-/* Callback invoked synchronously from pmh_input_poll() on the manager thread.
- * Pushes the event into the SPSC ring for the RT callback to consume. */
 static void midi_event_cb(const PmhMidiEvent *ev, void *userdata) {
     (void)userdata;
     if (!spsc_push(&s_midi_ring, ev))
@@ -258,7 +357,6 @@ static int open_first_midi_input(void) {
 static int manager_thread_fn(void *arg) {
     ManagerCtx *ctx = (ManagerCtx *)arg;
 
-    /* Init MIDI */
     if (pmh_init() != 0) {
         LOGE("pmh_init failed: %s", pmh_last_error());
     } else {
@@ -266,7 +364,6 @@ static int manager_thread_fn(void *arg) {
             LOGD("No MIDI input device found");
     }
 
-    /* Build the initial pipeline and publish it. */
     Pipeline *initial = pipeline_build(220.0f, 0.0f, 8000.0f);
     if (!initial) {
         LOGE("Failed to allocate initial pipeline");
@@ -274,7 +371,7 @@ static int manager_thread_fn(void *arg) {
         return 1;
     }
     pipeline_swap(initial);
-    LOGD("Initial pipeline published");
+    LOGD("Initial pipeline published (%d voices)", NUM_VOICES);
 
     while (SDL_GetAtomicInt(&ctx->running)) {
         /* ── MIDI polling ──────────────────────────────────────────────── */
@@ -290,35 +387,46 @@ static int manager_thread_fn(void *arg) {
             LOGD("Patch cmd: freq=%.1f amp=%.2f cutoff=%.0f", cmd.osc_freq, cmd.osc_amp,
                  cmd.filter_cutoff);
 
-            /*
-             * Rebuild the pipeline from scratch with the new parameters.
-             * MIDI polling pauses here — acceptable since a patch change
-             * is a user-initiated event, not a performance event.
-             *
-             * Preserve DSP state from the current pipeline where it makes
-             * sense (phase continuity, filter state) to avoid clicks.
-             */
             Pipeline *cur = atomic_load_explicit(&g_pipeline, memory_order_acquire);
-            float phase = cur ? cur->osc.phase : 0.0f;
-            float lp_z = cur ? cur->filter.z : 0.0f;
-
             Pipeline *np = pipeline_build(cmd.osc_freq, cmd.osc_amp, cmd.filter_cutoff);
             if (!np) {
                 LOGE("pipeline_build OOM — keeping current pipeline");
                 continue;
             }
-            /* Carry over phase and filter state for click-free transitions. */
-            np->osc.phase = phase;
-            np->filter.z = lp_z;
+
+            /*
+             * Carry over per-voice state for click-free transitions.
+             * Active voices keep their current pitch and amplitude;
+             * inactive voices will pick up the new defaults on their
+             * next note-on via voice_init().
+             */
+            if (cur) {
+                for (int i = 0; i < NUM_VOICES; ++i) {
+                    Voice *src = &cur->voices[i];
+                    Voice *dst = &np->voices[i];
+
+                    dst->osc.phase = src->osc.phase;
+                    dst->filter.z = src->filter.z;
+                    dst->active = src->active;
+                    dst->note = src->note;
+                    dst->velocity = src->velocity;
+                    dst->age = src->age;
+
+                    if (src->active) {
+                        /* Preserve frequency and amplitude of playing notes. */
+                        dst->osc.freq = src->osc.freq;
+                        dst->osc.amp = src->osc.amp;
+                    }
+                }
+            }
 
             pipeline_swap(np);
             LOGD("Pipeline rebuilt and published");
         }
 
-        SDL_Delay(1); /* ~1 ms poll cadence */
+        SDL_Delay(1);
     }
 
-    /* Cleanup */
     if (s_pm_in.pm_stream)
         pmh_input_close(&s_pm_in);
     pmh_shutdown();
@@ -328,7 +436,7 @@ static int manager_thread_fn(void *arg) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
- * Public API: send a patch command from the main thread
+ * Public API
  * ═════════════════════════════════════════════════════════════════════════ */
 
 void synth_send_patch(float osc_freq, float osc_amp, float filter_cutoff) {
@@ -342,7 +450,7 @@ void synth_send_patch(float osc_freq, float osc_amp, float filter_cutoff) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
- * synth_thread — entry point (called by thread_create in app.c)
+ * synth_thread — entry point
  * ═════════════════════════════════════════════════════════════════════════ */
 
 int synth_thread(void *data) {
@@ -350,11 +458,9 @@ int synth_thread(void *data) {
 
     audio_setup_print();
 
-    /* Initialise shared rings. */
     spsc_init(&s_midi_ring);
     patch_ring_init(&s_cmd_ring);
 
-    /* Start the manager thread. */
     static ManagerCtx mgr_ctx;
     SDL_SetAtomicInt(&mgr_ctx.running, 1);
     mgr_ctx.parent = this;
@@ -364,7 +470,6 @@ int synth_thread(void *data) {
         return 1;
     }
 
-    /* Open the SDL3 audio stream — this is what drives the RT callback. */
     SDL_AudioSpec spec = {
         .format = SDL_AUDIO_F32,
         .channels = CH,
@@ -380,20 +485,17 @@ int synth_thread(void *data) {
     }
 
     SDL_ResumeAudioStreamDevice(stream);
-    LOGD("Audio stream started (SR=%d CH=%d BLOCK=%d)", SR, CH, BLOCK);
+    LOGD("Audio stream started (SR=%d CH=%d BLOCK=%d NUM_VOICES=%d)", SR, CH, BLOCK, NUM_VOICES);
 
-    /* Park here until thread_stop() signals us. */
     while (SDL_GetAtomicInt(&this->running))
         SDL_Delay(10);
 
-    /* Teardown: stop manager, destroy audio stream, free pipeline. */
     LOGD("synth_thread: shutting down");
     SDL_SetAtomicInt(&mgr_ctx.running, 0);
     SDL_WaitThread(mgr_ctx.sdl_thread, NULL);
 
     SDL_DestroyAudioStream(stream);
 
-    /* Free the pipeline that's still live — no RT thread left to race with. */
     Pipeline *last = atomic_exchange_explicit(&g_pipeline, NULL, memory_order_acq_rel);
     pipeline_free(last);
 

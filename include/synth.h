@@ -5,12 +5,15 @@
 #include <SDL3/SDL_mutex.h>
 #include <SDL3/SDL_thread.h>
 #include <stdatomic.h>
+#include <stdbool.h>
+#include <stdint.h>
 
 /* ─── Constants ─────────────────────────────────────────────────────────── */
 
-#define SR    48000
-#define CH    2
-#define BLOCK 256 /* samples per callback block — keep power of 2 */
+#define SR 48000
+#define CH 2
+#define BLOCK 128*4    /* samples per callback block — keep power of 2     */
+#define NUM_VOICES 8 /* compile-time polyphony knob — change freely       */
 
 /* Grace period after an atomic pipeline swap before the old pipeline is
  * freed.  Two block-lengths at SR gives the RT thread time to finish any
@@ -34,56 +37,64 @@ typedef struct {
  * the smoother inside the render loop prevents zipper noise.
  */
 typedef struct {
-    float a;              /* filter coefficient, recomputed from cutoff */
-    float z;              /* one sample of state                        */
-    float cutoff_hz;      /* current (smoothed) cutoff                  */
-    float cutoff_target;  /* requested cutoff (set atomically from MIDI)*/
-    float cutoff_smooth;  /* one-pole smoother coeff for cutoff itself  */
+    float a;             /* filter coefficient, recomputed from cutoff */
+    float z;             /* one sample of state                        */
+    float cutoff_hz;     /* current (smoothed) cutoff                  */
+    float cutoff_target; /* requested cutoff (set atomically from MIDI)*/
+    float cutoff_smooth; /* one-pole smoother coeff for cutoff itself  */
 } LpFilter;
+
+/* ─── Voice ──────────────────────────────────────────────────────────────── */
+
+/**
+ * One independent synthesis voice: oscillator + filter + allocation metadata.
+ *
+ * Lives inside Pipeline.  All fields are written and read exclusively by the
+ * RT callback (voice_allocate / voice_release / render loop), so no locking
+ * is required.
+ */
+typedef struct {
+    Osc osc;
+    LpFilter filter;
+    uint8_t note;   /* MIDI note number 0–127                            */
+    float velocity; /* normalised 0–1; used as stealing priority key     */
+    uint32_t age;   /* incremented on each note-on; lower = older        */
+    bool active;    /* false = slot is free for allocation               */
+} Voice;
 
 /* ─── Pipeline ───────────────────────────────────────────────────────────── */
 
 /**
- * A complete, self-contained signal chain.
+ * A complete, self-contained signal chain with NUM_VOICES independent voices.
  *
  * The manager thread allocates and initialises one of these, then publishes
  * it via g_pipeline.  The RT thread reads it every block via an atomic
- * acquire-load and never modifies the struct layout — only the DSP state
- * fields (phase, z, cutoff_hz) inside.
+ * acquire-load.  All per-voice DSP state (phase, filter z, cutoff_hz) is
+ * written back by the RT thread at the end of each block.
  *
- * The pre-allocated stereo output block lives here so the RT callback never
- * needs to call malloc.
+ * The pre-allocated stereo output block lives here as a mix accumulator so
+ * the RT callback never needs to call malloc.
  */
 typedef struct Pipeline {
-    Osc      osc;
-    LpFilter filter;
-    float    block[BLOCK * CH]; /* pre-allocated render scratch buffer */
+    Voice voices[NUM_VOICES];
+    float block[BLOCK * CH]; /* mix accumulator — zeroed at top of each block */
 } Pipeline;
 
 /* ─── Inter-thread communication ─────────────────────────────────────────── */
 
 /**
- * Patch command sent from the main thread to the manager thread via a
- * second (non-RT) SPSC ring.  Add more fields as the synth grows.
+ * Patch command sent from the main thread to the manager thread.
+ * These are defaults applied to newly allocated voices; active, playing
+ * voices are not retroactively modified to avoid mid-chord surprises.
  */
 typedef struct {
-    float osc_freq;       /* Hz   */
-    float osc_amp;        /* 0–1  */
-    float filter_cutoff;  /* Hz   */
+    float osc_freq;      /* Hz   — default frequency for new voices */
+    float osc_amp;       /* 0–1  — default amplitude scalar         */
+    float filter_cutoff; /* Hz   — initial cutoff for new voices    */
 } PatchCmd;
 
 /* ─── Globals shared between manager and RT threads ─────────────────────── */
 
-/*
- * Atomic pipeline pointer.
- *
- * Manager: atomic_store(..., memory_order_release)  after full init.
- * RT:      atomic_load (..., memory_order_acquire)  at top of every block.
- *
- * Declared extern so synth.c owns the definition; other TUs can read it
- * if needed (e.g. a future visualiser thread), but should treat it as
- * read-only outside synth.c.
- */
 extern _Atomic(Pipeline *) g_pipeline;
 
 /* ─── Entry point ────────────────────────────────────────────────────────── */
@@ -95,8 +106,6 @@ int synth_thread(void *data);
 /**
  * Send a patch-change command from the main thread to the manager.
  * Non-blocking — drops the command silently if the ring is full.
- * The manager will rebuild the pipeline asynchronously; audio continues
- * uninterrupted until the new pipeline is swapped in.
  */
 void synth_send_patch(float osc_freq, float osc_amp, float filter_cutoff);
 
